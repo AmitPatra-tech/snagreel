@@ -1,0 +1,32 @@
+# Node
+node_modules/
+dist/
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Sidecar binaries (downloaded, not committed)
+src-tauri/binaries/*.exe
+src-tauri/binaries/yt-dlp
+src-tauri/binaries/ffmpeg
+
+# Secrets & signing keys (NEVER commit)
+*.key
+*.pem
+*.p12
+.env
+.env.*
+!.env.example
+
+# Optional Whisper speech-to-text model/binary (large, not committed)
+src-tauri/binaries/*.bin
+src-tauri/binaries/whisper*
+
+# Local machine settings
+.claude/settings.local.json
+
+# Misc
+logo-square.png
+*.log
+.DS_Store
