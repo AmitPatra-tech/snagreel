@@ -1,0 +1,61 @@
+name: Release Snagreel
+
+# Builds the private source, signs it, and publishes a public release here so
+# installed apps can auto-update. Trigger manually and choose the source ref.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Source ref (tag/branch/sha) in the private snagreel repo"
+        required: true
+        default: "main"
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out private source
+        uses: actions/checkout@v4
+        with:
+          repository: AmitPatra-tech/snagreel
+          ref: ${{ github.event.inputs.ref }}
+          token: ${{ secrets.SOURCE_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Fetch sidecars (yt-dlp + ffmpeg)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri/binaries | Out-Null
+          Invoke-WebRequest `
+            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" `
+            -OutFile "src-tauri/binaries/yt-dlp-x86_64-pc-windows-msvc.exe"
+          Invoke-WebRequest `
+            "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" `
+            -OutFile "ffmpeg.zip"
+          Expand-Archive "ffmpeg.zip" -DestinationPath "ffmpeg_extract" -Force
+          $exe = Get-ChildItem "ffmpeg_extract" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          Copy-Item $exe.FullName "src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe"
+
+      - name: Build, sign & publish release (with updater manifest)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        with:
+          tagName: v__VERSION__
+          releaseName: "Snagreel v__VERSION__"
+          releaseBody: "Download the installer below. Existing installs update automatically."
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true

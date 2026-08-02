@@ -23,10 +23,21 @@ must be public so end users' apps can download updates.
 
 2. **Secrets on the `snagreel-releases` repo** (Settings → Secrets → Actions):
    - `TAURI_SIGNING_PRIVATE_KEY` — the full contents of the private key file above.
-     (Set automatically during setup; re-set with
-     `gh secret set TAURI_SIGNING_PRIVATE_KEY --repo AmitPatra-tech/snagreel-releases < "$HOME/.tauri/snagreel-updater.key"`.)
-   - `SOURCE_TOKEN` — a GitHub **fine-grained PAT** with **read** access to the
-     private `snagreel` repo (so the release workflow can check out the source).
+     ✅ Already set. Re-set with
+     `gh secret set TAURI_SIGNING_PRIVATE_KEY --repo AmitPatra-tech/snagreel-releases < "$HOME/.tauri/snagreel-updater.key"`.
+   - `SOURCE_TOKEN` — a GitHub **fine-grained PAT** with **read (Contents)** access to
+     the private `snagreel` repo (so the release workflow can check out the source).
+     Create at GitHub → Settings → Developer settings → Fine-grained tokens, then add
+     it as this secret.
+
+3. **Add the release workflow to `snagreel-releases`.** The workflow file is versioned
+   here at [`docs/github-release-workflow.yml`](docs/github-release-workflow.yml). It
+   could not be pushed automatically (the CLI token lacks the `workflow` scope), so add
+   it once, either way:
+   - **Web UI:** in `snagreel-releases`, *Add file → Create new file*, name it
+     `.github/workflows/release.yml`, paste the contents, commit. **or**
+   - **CLI:** `gh auth refresh -h github.com -s workflow`, then copy the file into the
+     releases repo under `.github/workflows/release.yml` and push.
 
 ## Cutting a new version (e.g. v2)
 
