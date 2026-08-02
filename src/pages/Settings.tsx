@@ -244,7 +244,7 @@ export function SettingsPage() {
           <CardTitle>About</CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
-          <p>Snagreel v1.0.0</p>
+          <p>Snagreel v1.0.0 — by HutZon</p>
           <p className="mt-1">
             The fastest, cleanest way to download and manage your media.
           </p>

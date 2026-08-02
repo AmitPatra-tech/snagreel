@@ -21,10 +21,10 @@ export function Sidebar() {
   return (
     <aside className="flex h-full w-56 shrink-0 flex-col border-r bg-card/50">
       <div className="flex items-center gap-2.5 px-4 py-5">
-        <img src={logo} alt="Snagreel" className="h-8 w-8 rounded-md" />
+        <img src={logo} alt="Snagreel by HutZon" className="h-8 w-8 rounded-md" />
         <div className="leading-tight">
           <div className="text-sm font-semibold">Snagreel</div>
-          <div className="text-xs text-muted-foreground">Downloader</div>
+          <div className="text-xs text-muted-foreground">by HutZon</div>
         </div>
       </div>
       <nav className="flex flex-1 flex-col gap-1 px-3">
