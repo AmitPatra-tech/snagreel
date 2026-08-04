@@ -118,6 +118,9 @@ pub struct Settings {
     pub notifications: bool,
     pub filename_template: String,
     pub organize_by_platform: bool,
+    /// Browser to read cookies from for login-gated sites, or "none".
+    /// One of: none | chrome | edge | firefox | brave | opera | vivaldi | chromium.
+    pub cookies_browser: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

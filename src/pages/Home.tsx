@@ -69,8 +69,8 @@ export function HomePage() {
           Download from <span className="text-primary">thousands</span> of sites
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Paste a link to a video, song or playlist — pick a quality, and it lands in
-          your library.
+          Paste a link to a video, song, playlist — or any web page playing a video —
+          pick a quality, and it lands in your library.
         </p>
       </div>
 

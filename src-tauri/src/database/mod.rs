@@ -120,6 +120,16 @@ impl Db {
             )?;
         }
 
+        if version < 3 {
+            // Optional browser to pull cookies from (login-gated sites).
+            conn.execute_batch(
+                "BEGIN;
+                ALTER TABLE settings ADD COLUMN cookies_browser TEXT NOT NULL DEFAULT 'none';
+                PRAGMA user_version = 3;
+                COMMIT;",
+            )?;
+        }
+
         conn.execute(
             "INSERT OR IGNORE INTO settings (id, download_path) VALUES (1, ?1)",
             params![default_download_path],
@@ -447,7 +457,7 @@ impl Db {
         let conn = self.conn.lock().unwrap();
         Ok(conn.query_row(
             "SELECT download_path, theme, language, max_concurrent_downloads, auto_update, \
-             notifications, filename_template, organize_by_platform FROM settings WHERE id = 1",
+             notifications, filename_template, organize_by_platform, cookies_browser FROM settings WHERE id = 1",
             [],
             |row| {
                 Ok(Settings {
@@ -459,6 +469,7 @@ impl Db {
                     notifications: row.get::<_, i64>(5)? != 0,
                     filename_template: row.get(6)?,
                     organize_by_platform: row.get::<_, i64>(7)? != 0,
+                    cookies_browser: row.get(8)?,
                 })
             },
         )?)
@@ -469,7 +480,7 @@ impl Db {
         conn.execute(
             "UPDATE settings SET download_path = ?1, theme = ?2, language = ?3, \
              max_concurrent_downloads = ?4, auto_update = ?5, notifications = ?6, \
-             filename_template = ?7, organize_by_platform = ?8 WHERE id = 1",
+             filename_template = ?7, organize_by_platform = ?8, cookies_browser = ?9 WHERE id = 1",
             params![
                 s.download_path,
                 s.theme,
@@ -479,6 +490,7 @@ impl Db {
                 s.notifications as i64,
                 s.filename_template,
                 s.organize_by_platform as i64,
+                s.cookies_browser,
             ],
         )?;
         Ok(())

@@ -1,10 +1,27 @@
 use std::path::Path;
 
 use serde_json::Value;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_shell::ShellExt;
 
+use crate::database::Db;
 use crate::models::{Download, MediaFormat, MediaInfo, PlaylistEntry, Settings};
+
+/// Browsers yt-dlp can read cookies from. Anything else is ignored so we never
+/// pass an arbitrary string through to the sidecar.
+const SUPPORTED_COOKIE_BROWSERS: &[&str] = &[
+    "chrome", "chromium", "edge", "firefox", "brave", "opera", "vivaldi", "safari", "whale",
+];
+
+/// `--cookies-from-browser <browser>` args, or empty when disabled/invalid.
+pub fn cookies_args(settings: &Settings) -> Vec<String> {
+    let b = settings.cookies_browser.trim().to_ascii_lowercase();
+    if SUPPORTED_COOKIE_BROWSERS.contains(&b.as_str()) {
+        vec!["--cookies-from-browser".into(), b]
+    } else {
+        Vec::new()
+    }
+}
 
 /// Turn raw yt-dlp stderr into a message a user can act on (PRD §16).
 pub fn friendly_error(stderr: &str) -> String {
@@ -73,11 +90,19 @@ fn entry_thumbnail(entry: &Value) -> Option<String> {
 
 /// Run `yt-dlp -J` and shape the result for the UI.
 pub async fn fetch_metadata(app: &AppHandle, url: &str) -> Result<MediaInfo, String> {
+    let mut args: Vec<String> =
+        vec!["-J".into(), "--flat-playlist".into(), "--no-warnings".into()];
+    if let Ok(settings) = app.state::<Db>().get_settings() {
+        args.extend(cookies_args(&settings));
+    }
+    args.push("--".into());
+    args.push(url.to_string());
+
     let command = app
         .shell()
         .sidecar("yt-dlp")
         .map_err(|_| "yt-dlp is missing. Reinstall the app to restore it.".to_string())?
-        .args(["-J", "--flat-playlist", "--no-warnings", "--", url]);
+        .args(args);
 
     let output = command
         .output()
@@ -245,6 +270,9 @@ pub fn build_download_args(
 
     #[cfg(target_os = "windows")]
     args.push("--windows-filenames".into());
+
+    // Use browser cookies for login-gated sites, when configured.
+    args.extend(cookies_args(settings));
 
     // Pro "cutout": download only a time section of a long video.
     if download.clip_start.is_some() || download.clip_end.is_some() {

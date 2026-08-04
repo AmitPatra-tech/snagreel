@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "additionalDirectories": [
+      "D:\\Software"
+    ],
+    "allow": [
+      "PowerShell(Move-Item -LiteralPath \"D:\\\\Software\\\\All-in-One Download\" -Destination \"D:\\\\Software\\\\Snagreel\")"
+    ]
+  }
+}

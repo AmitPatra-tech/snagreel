@@ -124,6 +124,7 @@ export interface Settings {
   notifications: boolean;
   filename_template: string;
   organize_by_platform: boolean;
+  cookies_browser: string;
 }
 
 export interface ProgressPayload {

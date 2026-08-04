@@ -34,6 +34,7 @@ const schema = z.object({
   notifications: z.boolean(),
   filename_template: z.string().min(1, "Template cannot be empty"),
   organize_by_platform: z.boolean(),
+  cookies_browser: z.string(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -168,6 +169,36 @@ export function SettingsPage() {
               <code className="rounded bg-secondary px-1">
                 %(uploader)s - %(title)s.%(ext)s
               </code>
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Sign-in cookies from browser</Label>
+            <Controller
+              control={control}
+              name="cookies_browser"
+              render={({ field }) => (
+                <Select value={field.value || "none"} onValueChange={field.onChange}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Don't use cookies</SelectItem>
+                    <SelectItem value="chrome">Chrome</SelectItem>
+                    <SelectItem value="edge">Edge</SelectItem>
+                    <SelectItem value="firefox">Firefox</SelectItem>
+                    <SelectItem value="brave">Brave</SelectItem>
+                    <SelectItem value="opera">Opera</SelectItem>
+                    <SelectItem value="vivaldi">Vivaldi</SelectItem>
+                    <SelectItem value="chromium">Chromium</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+            <p className="text-xs text-muted-foreground">
+              Lets Snagreel download videos from sites that require you to be logged in, by
+              reusing your browser's session. If a download fails to read cookies, close that
+              browser and try again. (DRM-protected services still can't be downloaded.)
             </p>
           </div>
         </CardContent>
