@@ -45,6 +45,13 @@ pub fn run() {
             queue_manager.start(handle.clone());
             app.manage(queue_manager);
 
+            // Keep an active licence topped up without the user noticing.
+            let license_handle = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                let db = license_handle.state::<Db>();
+                commands::renew_license(&db).await;
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

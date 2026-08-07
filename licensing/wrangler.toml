@@ -1,0 +1,16 @@
+name = "snagreel-licensing"
+main = "src/index.ts"
+compatibility_date = "2026-01-15"
+
+# Secrets (set with `wrangler secret put <NAME>`, never committed):
+#   PEPPER       — must match the v1.0.0 client pepper, or seeded keys stop working
+#   SIGNING_KEY  — base64 PKCS#8 Ed25519 private key
+#   ADMIN_TOKEN  — bearer token guarding /admin/*
+
+[[d1_databases]]
+binding = "DB"
+database_name = "snagreel-licensing"
+database_id = "9593f3da-f69d-40a1-9a59-c1f0c32f7fde"
+
+[observability]
+enabled = true

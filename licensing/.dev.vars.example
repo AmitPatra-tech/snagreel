@@ -1,0 +1,6 @@
+# Copy to .dev.vars for local `wrangler dev`. Never commit the real file.
+# Must be byte-identical to the pepper the v1.0.0 client used, or the 48 seeded
+# key hashes stop matching and existing customers cannot re-activate.
+PEPPER = "<the v1.0.0 pepper>"
+SIGNING_KEY = "<base64 PKCS#8 Ed25519 private key>"
+ADMIN_TOKEN = "<any long random string>"

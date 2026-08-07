@@ -27,6 +27,7 @@ export function ProActivation({ compact = false }: { compact?: boolean }) {
   const [copied, setCopied] = useState(false);
 
   const isPro = activation?.is_pro ?? false;
+  const needsReactivation = activation?.needs_reactivation ?? false;
 
   const submit = () => {
     if (!key.trim() || activate.isPending) return;
@@ -72,7 +73,23 @@ export function ProActivation({ compact = false }: { compact?: boolean }) {
 
   return (
     <div className="space-y-5">
-      {!compact && (
+      {needsReactivation && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm">
+          <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+          <div>
+            <p className="font-medium text-amber-700 dark:text-amber-400">
+              Please re-enter your activation key
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Snagreel now checks licences with our activation server, which lets
+              us support you across your devices. Your existing key still works —
+              enter it once below and you are set. Nothing to pay again.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {!compact && !needsReactivation && (
         <ul className="space-y-1.5">
           {PRO_FEATURES.map((f) => (
             <li key={f} className="flex items-start gap-2 text-sm text-muted-foreground">
@@ -84,6 +101,9 @@ export function ProActivation({ compact = false }: { compact?: boolean }) {
       )}
 
       <ol className="space-y-3">
+        {/* Someone re-activating has already paid — only the key step applies. */}
+        {!needsReactivation && (
+          <>
         <Step n={1} icon={<CreditCard className="h-4 w-4" />} title="Pay with Dodo Payments">
           <Button
             size="sm"
@@ -108,7 +128,13 @@ export function ProActivation({ compact = false }: { compact?: boolean }) {
             . We will respond within 5 minutes with your activation key.
           </p>
         </Step>
-        <Step n={3} icon={<KeyRound className="h-4 w-4" />} title="Enter your activation key">
+          </>
+        )}
+        <Step
+          n={needsReactivation ? 1 : 3}
+          icon={<KeyRound className="h-4 w-4" />}
+          title="Enter your activation key"
+        >
           <div className="mt-1 flex gap-2">
             <Input
               value={key}

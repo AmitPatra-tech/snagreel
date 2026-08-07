@@ -130,6 +130,21 @@ impl Db {
             )?;
         }
 
+        if version < 4 {
+            // Server-issued licensing: store the signed token, the key it came
+            // from (so we can renew unattended), and a stable device id.
+            // `pro_key_hash` is kept only to detect pre-1.1 Pro users, who have
+            // to re-enter their key once — see `needs_reactivation`.
+            conn.execute_batch(
+                "BEGIN;
+                ALTER TABLE settings ADD COLUMN pro_token TEXT;
+                ALTER TABLE settings ADD COLUMN pro_key TEXT;
+                ALTER TABLE settings ADD COLUMN device_id TEXT;
+                PRAGMA user_version = 4;
+                COMMIT;",
+            )?;
+        }
+
         conn.execute(
             "INSERT OR IGNORE INTO settings (id, download_path) VALUES (1, ?1)",
             params![default_download_path],
@@ -139,38 +154,77 @@ impl Db {
 
     // ---------- activation ----------
 
-    /// The stored Pro key hash, if any (may be a legacy/invalid value).
-    pub fn get_pro_key_hash(&self) -> Result<Option<String>> {
+    /// This installation's device id, generated on first use and then stable.
+    pub fn device_id(&self) -> Result<String> {
         let conn = self.conn.lock().unwrap();
-        Ok(conn.query_row(
-            "SELECT pro_key_hash FROM settings WHERE id = 1",
+        let existing: Option<String> = conn.query_row(
+            "SELECT device_id FROM settings WHERE id = 1",
             [],
             |row| row.get::<_, Option<String>>(0),
+        )?;
+        if let Some(id) = existing.filter(|id| id.len() == 64) {
+            return Ok(id);
+        }
+        let fresh = crate::activation::new_device_id();
+        conn.execute(
+            "UPDATE settings SET device_id = ?1 WHERE id = 1",
+            params![fresh],
+        )?;
+        Ok(fresh)
+    }
+
+    /// The stored licence token and the key that produced it.
+    pub fn get_license(&self) -> Result<(Option<String>, Option<String>)> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn.query_row(
+            "SELECT pro_token, pro_key FROM settings WHERE id = 1",
+            [],
+            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?)),
         )?)
     }
 
-    pub fn set_pro_key_hash(&self, hash: &str) -> Result<()> {
+    pub fn set_license(&self, token: &str, key: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "UPDATE settings SET pro_key_hash = ?1 WHERE id = 1",
-            params![hash],
+            "UPDATE settings SET pro_token = ?1, pro_key = ?2, pro_key_hash = NULL WHERE id = 1",
+            params![token, key.trim()],
         )?;
         Ok(())
     }
 
-    pub fn clear_pro_key_hash(&self) -> Result<()> {
+    pub fn clear_license(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
-        conn.execute("UPDATE settings SET pro_key_hash = NULL WHERE id = 1", [])?;
+        conn.execute(
+            "UPDATE settings SET pro_token = NULL, pro_key = NULL, pro_key_hash = NULL WHERE id = 1",
+            [],
+        )?;
         Ok(())
     }
 
-    /// True only when the stored hash is a genuine embedded valid-key hash.
-    /// Writing a bogus value into the DB does not unlock Pro.
+    /// True when a pre-1.1 licence is on record but no token has replaced it.
+    pub fn needs_reactivation(&self) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT pro_key_hash IS NOT NULL AND pro_token IS NULL FROM settings WHERE id = 1",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap_or(false)
+    }
+
+    /// The verified claims of the stored token, if it is currently valid.
+    ///
+    /// Every check re-verifies the Ed25519 signature and the expiry, so editing
+    /// the database by hand cannot unlock Pro — the value has to be a token
+    /// this device was actually issued.
+    pub fn license_claims(&self) -> Option<crate::activation::TokenClaims> {
+        let device_id = self.device_id().ok()?;
+        let (token, _) = self.get_license().ok()?;
+        crate::activation::verify_token(&token?, &device_id)
+    }
+
     pub fn is_pro(&self) -> bool {
-        match self.get_pro_key_hash() {
-            Ok(Some(hash)) => crate::activation::is_valid_hash(&hash),
-            _ => false,
-        }
+        self.license_claims().is_some()
     }
 
     /// Crash recovery: anything left as `downloading` goes back to the queue.

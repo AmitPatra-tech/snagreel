@@ -30,3 +30,8 @@ src-tauri/binaries/whisper*
 logo-square.png
 *.log
 .DS_Store
+
+# Cloudflare Worker local secrets (NEVER commit)
+licensing/.dev.vars
+licensing/node_modules/
+licensing/.wrangler/

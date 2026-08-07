@@ -208,25 +208,65 @@ pub fn show_in_folder(db: State<Db>, id: i64) -> Result<(), String> {
 
 // ---------- activation (Pro) ----------
 
-#[tauri::command]
-pub fn get_activation(db: State<Db>) -> Result<ActivationState, String> {
-    Ok(ActivationState { is_pro: db.is_pro() })
+/// Current licence state, derived purely from the locally stored token.
+pub fn activation_state(db: &Db) -> ActivationState {
+    match db.license_claims() {
+        Some(claims) => ActivationState {
+            is_pro: true,
+            needs_reactivation: false,
+            expires_at: Some(claims.exp),
+        },
+        None => ActivationState {
+            is_pro: false,
+            needs_reactivation: db.needs_reactivation(),
+            expires_at: None,
+        },
+    }
 }
 
 #[tauri::command]
-pub fn activate_pro(db: State<Db>, key: String) -> Result<ActivationState, String> {
-    if !activation::is_valid_key(&key) {
-        return Err("That activation key is not valid. Double-check it and try again.".into());
+pub fn get_activation(db: State<Db>) -> Result<ActivationState, String> {
+    Ok(activation_state(&db))
+}
+
+#[tauri::command]
+pub async fn activate_pro(db: State<'_, Db>, key: String) -> Result<ActivationState, String> {
+    if key.trim().is_empty() {
+        return Err("Enter your activation key to continue.".into());
     }
-    let hash = activation::hash_key(&key);
-    db.set_pro_key_hash(&hash).map_err(err_string)?;
-    Ok(ActivationState { is_pro: db.is_pro() })
+    let device_id = db.device_id().map_err(err_string)?;
+    let token = activation::request_token(&key, &device_id).await?;
+    db.set_license(&token, &key).map_err(err_string)?;
+    Ok(activation_state(&db))
 }
 
 #[tauri::command]
 pub fn deactivate_pro(db: State<Db>) -> Result<ActivationState, String> {
-    db.clear_pro_key_hash().map_err(err_string)?;
-    Ok(ActivationState { is_pro: db.is_pro() })
+    db.clear_license().map_err(err_string)?;
+    Ok(activation_state(&db))
+}
+
+/// Renew the licence token when it is nearing expiry. Runs once at startup.
+///
+/// Deliberately silent: someone who is offline keeps their Pro features until
+/// the token actually lapses, and there is nothing useful to tell them before
+/// then. A revoked key simply fails to renew and lapses at expiry.
+pub async fn renew_license(db: &Db) {
+    let Ok(device_id) = db.device_id() else { return };
+    let Ok((token, key)) = db.get_license() else { return };
+    let Some(key) = key else { return };
+
+    let still_fresh = token
+        .as_deref()
+        .and_then(|t| activation::verify_token(t, &device_id))
+        .is_some_and(|claims| !activation::needs_refresh(&claims));
+    if still_fresh {
+        return;
+    }
+
+    if let Ok(fresh) = activation::request_token(&key, &device_id).await {
+        let _ = db.set_license(&fresh, &key);
+    }
 }
 
 // ---------- editing (Pro) ----------

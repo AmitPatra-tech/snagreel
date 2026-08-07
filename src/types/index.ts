@@ -74,6 +74,10 @@ export interface DownloadRequest {
 
 export interface ActivationState {
   is_pro: boolean;
+  /** A pre-1.1 licence is on record but must be re-entered once. */
+  needs_reactivation: boolean;
+  /** Unix seconds at which the current licence lapses. */
+  expires_at: number | null;
 }
 
 export type EditOperation = "trim" | "convert";
