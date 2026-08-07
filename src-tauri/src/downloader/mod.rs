@@ -242,6 +242,40 @@ fn fmt_secs(s: f64) -> String {
     }
 }
 
+/// Build the `-f` selector for a video download.
+///
+/// The container decides which codecs are actually playable: an MP4 holding an
+/// Opus track muxes fine but plays silent in Windows Media Player, Movies & TV,
+/// QuickTime and most phone players, and a WebM cannot hold AVC/AAC at all. So
+/// we ask for container-native codecs first and only widen the net if the site
+/// has nothing better, which keeps every download succeeding *and* audible.
+fn video_format_selector(height: Option<&str>, container: &str) -> String {
+    let h = height
+        .map(|h| format!("[height<={h}]"))
+        .unwrap_or_default();
+
+    // (video codec filter, audio codec filter, video ext, audio ext)
+    let native = match container {
+        "mp4" => Some(("[vcodec^=avc1]", "[acodec^=mp4a]", "mp4", "m4a")),
+        "webm" => Some(("[vcodec^=vp9]", "[acodec^=opus]", "webm", "webm")),
+        // mkv (and anything else) carries any codec combination.
+        _ => None,
+    };
+
+    let mut tiers: Vec<String> = Vec::new();
+    if let Some((vcodec, acodec, vext, aext)) = native {
+        tiers.push(format!("bestvideo{h}{vcodec}+bestaudio{acodec}"));
+        tiers.push(format!("bestvideo{h}[ext={vext}]+bestaudio[ext={aext}]"));
+        tiers.push(format!("best{h}[ext={vext}]"));
+    }
+    tiers.push(format!("bestvideo{h}+bestaudio"));
+    if !h.is_empty() {
+        tiers.push(format!("best{h}"));
+    }
+    tiers.push("best".into());
+    tiers.join("/")
+}
+
 /// Build the yt-dlp argument list for a queued download.
 pub fn build_download_args(
     download: &Download,
@@ -311,12 +345,7 @@ pub fn build_download_args(
             .map(|r| r.trim_end_matches('p').to_string())
             .filter(|h| h.parse::<u32>().is_ok());
         args.push("-f".into());
-        match &height {
-            Some(h) => args.push(format!(
-                "bestvideo[height<={h}]+bestaudio/best[height<={h}]/best"
-            )),
-            None => args.push("bestvideo+bestaudio/best".into()),
-        }
+        args.push(video_format_selector(height.as_deref(), &download.format));
         if !download.format.is_empty() {
             args.push("--merge-output-format".into());
             args.push(download.format.clone());
@@ -326,4 +355,45 @@ pub fn build_download_args(
     args.push("--".into());
     args.push(download.url.clone());
     args
+}
+
+#[cfg(test)]
+mod tests {
+    use super::video_format_selector;
+
+    #[test]
+    fn mp4_prefers_codecs_that_stay_audible() {
+        let sel = video_format_selector(Some("1080"), "mp4");
+        // First choice pins AVC video + AAC audio, so the merged MP4 plays
+        // everywhere instead of carrying a silent-on-Windows Opus track.
+        assert!(sel.starts_with("bestvideo[height<=1080][vcodec^=avc1]+bestaudio[acodec^=mp4a]/"));
+        // …and it still degrades to something downloadable.
+        assert!(sel.ends_with("/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"));
+    }
+
+    #[test]
+    fn webm_prefers_vp9_and_opus() {
+        let sel = video_format_selector(None, "webm");
+        assert!(sel.starts_with("bestvideo[vcodec^=vp9]+bestaudio[acodec^=opus]/"));
+        assert!(!sel.contains("height<="));
+    }
+
+    #[test]
+    fn mkv_takes_any_codec_pair() {
+        assert_eq!(
+            video_format_selector(Some("720"), "mkv"),
+            "bestvideo[height<=720]+bestaudio/best[height<=720]/best"
+        );
+    }
+
+    #[test]
+    fn every_selector_ends_with_a_catch_all() {
+        for container in ["mp4", "webm", "mkv", ""] {
+            for height in [None, Some("480")] {
+                let sel = video_format_selector(height, container);
+                assert!(sel.ends_with("/best"), "{container}/{height:?}: {sel}");
+                assert!(sel.contains("+bestaudio"), "{container}/{height:?}: {sel}");
+            }
+        }
+    }
 }
