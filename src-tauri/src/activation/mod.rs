@@ -37,7 +37,7 @@ const LICENSE_PUBLIC_KEY: [u8; 32] = [
 
 /// Licensing service base URL. Override with `SNAGREEL_LICENSE_URL` when
 /// testing against a local `wrangler dev`.
-const DEFAULT_LICENSE_URL: &str = "https://snagreel-licensing.hutzon.workers.dev";
+const DEFAULT_LICENSE_URL: &str = "https://snagreel-licensing.hutzonsnagreel.workers.dev";
 
 /// Refresh once the token has less than this long to live.
 const REFRESH_WHEN_DAYS_LEFT: i64 = 14;
