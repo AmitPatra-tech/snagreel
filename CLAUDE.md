@@ -98,8 +98,18 @@ building it — see conversation history if the reasoning needs to be
 re-justified.
 
 ### Repo visibility
-Repo is `private` as of 2026-08-08. The user wants to make it **public**
-eventually (activation keys are no longer embedded, so nothing in the repo lets
-someone forge a licence — only rebuild without checking one). Do not flip
-visibility without an explicit go-ahead in that specific conversation; this is a
-one-way door people can clone/fork before you'd notice.
+Repo went **public** on 2026-08-08 (`https://github.com/AmitPatra-tech/snagreel`),
+after the licensing rewrite removed all key material from the source. Git history
+was audited for secrets first and was clean. Consequence the user accepted
+knowingly: anyone can rebuild without the licence check. Never commit the signing
+key, `licensing/.dev.vars`, or the ADMIN_TOKEN — this repo is now world-readable.
+
+Side effect: `SOURCE_TOKEN` is no longer needed on `snagreel-releases`, because
+`actions/checkout` can read a public repo without a PAT.
+
+## Displayed version
+
+The sidebar and Settings → About read the version via `useAppVersion()`
+(`src/hooks/useAppVersion.ts`, backed by Tauri's `getVersion()`). Do not hardcode
+version strings in the UI — they previously drifted and shipped "v1.0.0" on a
+1.0.1 build.
