@@ -5,13 +5,14 @@ startup and prompt the user when a newer version exists.
 
 ## Repos
 
-- **`snagreel`** (private) — the source code (this repo).
+- **`snagreel`** (public) — the source code (this repo).
 - **`snagreel-releases`** (public) — hosts installers + the update manifest
   (`latest.json`). The app's updater endpoint points here:
   `https://github.com/AmitPatra-tech/snagreel-releases/releases/latest/download/latest.json`
 
-Keeping source private protects the code and the Pro activation scheme; releases
-must be public so end users' apps can download updates.
+The source is public: activation keys are no longer embedded in it (the Pro check
+lives in the `licensing/` Worker), so there is nothing in the repo to protect.
+Releases are public so end users' apps can download updates.
 
 ## One-time setup
 
@@ -25,10 +26,9 @@ must be public so end users' apps can download updates.
    - `TAURI_SIGNING_PRIVATE_KEY` — the full contents of the private key file above.
      ✅ Already set. Re-set with
      `gh secret set TAURI_SIGNING_PRIVATE_KEY --repo AmitPatra-tech/snagreel-releases < "$HOME/.tauri/snagreel-updater.key"`.
-   - `SOURCE_TOKEN` — a GitHub **fine-grained PAT** with **read (Contents)** access to
-     the private `snagreel` repo (so the release workflow can check out the source).
-     Create at GitHub → Settings → Developer settings → Fine-grained tokens, then add
-     it as this secret.
+   - `SOURCE_TOKEN` — **no longer needed.** It existed so the workflow could check
+     out a private source repo; `snagreel` is public now, so `actions/checkout`
+     reads it without any token.
 
 3. **Add the release workflow to `snagreel-releases`.** The workflow file is versioned
    here at [`docs/github-release-workflow.yml`](docs/github-release-workflow.yml). It
