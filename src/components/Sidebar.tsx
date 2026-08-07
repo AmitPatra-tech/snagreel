@@ -2,6 +2,7 @@ import { NavLink } from "react-router-dom";
 import { Download, Home, Library, Settings, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDownloads } from "@/hooks/useDownloads";
+import { useAppVersion } from "@/hooks/useAppVersion";
 import logo from "@/assets/logo.png";
 
 const links = [
@@ -14,6 +15,7 @@ const links = [
 
 export function Sidebar() {
   const { data: downloads } = useDownloads();
+  const version = useAppVersion();
   const activeCount =
     downloads?.filter((d) => d.status === "downloading" || d.status === "queued")
       .length ?? 0;
@@ -52,7 +54,9 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
-      <div className="px-4 py-3 text-[11px] text-muted-foreground">v1.0.0 · MVP</div>
+      <div className="px-4 py-3 text-[11px] text-muted-foreground">
+        {version && `v${version}`}
+      </div>
     </aside>
   );
 }

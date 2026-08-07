@@ -23,6 +23,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Sparkles } from "lucide-react";
 import { useSettings, useUpdateSettings } from "@/hooks/useSettings";
+import { useAppVersion } from "@/hooks/useAppVersion";
 import { ProActivation } from "@/components/ProActivation";
 
 const schema = z.object({
@@ -42,6 +43,7 @@ type FormValues = z.infer<typeof schema>;
 export function SettingsPage() {
   const { data: settings } = useSettings();
   const updateSettings = useUpdateSettings();
+  const version = useAppVersion();
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -275,7 +277,7 @@ export function SettingsPage() {
           <CardTitle>About</CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
-          <p>Snagreel v1.0.0 — by HutZon</p>
+          <p>Snagreel{version && ` v${version}`} — by HutZon</p>
           <p className="mt-1">
             The fastest, cleanest way to download and manage your media.
           </p>
