@@ -1,6 +1,6 @@
 [package]
 name = "snagreel"
-version = "1.0.0"
+version = "1.0.1"
 description = "The fastest, cleanest universal media downloader"
 authors = ["Snagreel"]
 edition = "2021"
