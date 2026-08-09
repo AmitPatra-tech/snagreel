@@ -42,6 +42,13 @@ pub fn friendly_error(stderr: &str) -> String {
     if lower.contains("http error 403") {
         return "Access denied by the website (HTTP 403).".into();
     }
+    if lower.contains("cannot parse data") || lower.contains("unable to extract") {
+        // Sites like Facebook rotate several page layouts for the same URL and
+        // the extractor only understands some of them, so this is usually
+        // luck rather than anything the user did. yt-dlp's own text tells them
+        // to file a bug report, which is a dead end — don't pass that on.
+        return "This site returned an unexpected response. Please try again in a moment.".into();
+    }
     if lower.contains("getaddrinfo")
         || lower.contains("timed out")
         || lower.contains("temporary failure")
@@ -66,6 +73,45 @@ pub fn friendly_error(stderr: &str) -> String {
         .filter(|l| !l.is_empty())
         .unwrap_or_else(|| "Download failed.".into())
 }
+
+/// Is this failure worth another attempt?
+///
+/// Some sites serve several page layouts for the same URL and the extractor
+/// only parses some of them, so an identical request can fail and then succeed
+/// seconds later. Permanent failures are listed first and win outright, so a
+/// user never waits through retries for something that can never work.
+pub fn is_transient(stderr: &str) -> bool {
+    let lower = stderr.to_lowercase();
+    let permanent = [
+        "unsupported url",
+        "private video",
+        "this video is private",
+        "login required",
+        "sign in",
+        "http error 404",
+        "does not exist",
+        "no space left",
+        "removed by the uploader",
+    ];
+    if permanent.iter().any(|p| lower.contains(p)) {
+        return false;
+    }
+    let retryable = [
+        "cannot parse data",
+        "unable to extract",
+        "unable to download webpage",
+        "http error 5",
+        "timed out",
+        "temporary failure",
+        "connection reset",
+        "connection aborted",
+    ];
+    retryable.iter().any(|r| lower.contains(r))
+}
+
+/// Attempts for a metadata fetch, and the waits between them.
+const METADATA_ATTEMPTS: usize = 3;
+const RETRY_BACKOFF_MS: [u64; 2] = [400, 1200];
 
 fn json_str(value: &Value, key: &str) -> Option<String> {
     value.get(key).and_then(|v| v.as_str()).map(String::from)
@@ -98,23 +144,35 @@ pub async fn fetch_metadata(app: &AppHandle, url: &str) -> Result<MediaInfo, Str
     args.push("--".into());
     args.push(url.to_string());
 
-    let command = app
-        .shell()
-        .sidecar("yt-dlp")
-        .map_err(|_| "yt-dlp is missing. Reinstall the app to restore it.".to_string())?
-        .args(args);
+    // Retry transient extractor failures rather than surfacing them: the same
+    // request can fail and then succeed moments later (see `is_transient`).
+    let mut stdout = Vec::new();
+    for attempt in 0..METADATA_ATTEMPTS {
+        let command = app
+            .shell()
+            .sidecar("yt-dlp")
+            .map_err(|_| "yt-dlp is missing. Reinstall the app to restore it.".to_string())?
+            .args(args.clone());
 
-    let output = command
-        .output()
-        .await
-        .map_err(|e| format!("Could not start yt-dlp: {e}"))?;
+        let output = command
+            .output()
+            .await
+            .map_err(|e| format!("Could not start yt-dlp: {e}"))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(friendly_error(&stderr));
+        if output.status.success() {
+            stdout = output.stdout;
+            break;
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        let last_attempt = attempt + 1 == METADATA_ATTEMPTS;
+        if last_attempt || !is_transient(&stderr) {
+            return Err(friendly_error(&stderr));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(RETRY_BACKOFF_MS[attempt])).await;
     }
 
-    let json: Value = serde_json::from_slice(&output.stdout)
+    let json: Value = serde_json::from_slice(&stdout)
         .map_err(|_| "Could not read media information for this URL.".to_string())?;
 
     let platform = json_str(&json, "extractor_key")
@@ -359,7 +417,62 @@ pub fn build_download_args(
 
 #[cfg(test)]
 mod tests {
-    use super::video_format_selector;
+    use super::{friendly_error, is_transient, video_format_selector, METADATA_ATTEMPTS,
+                RETRY_BACKOFF_MS};
+
+    #[test]
+    fn parse_failures_are_retried() {
+        // The exact Facebook failure that prompted this: intermittent, and it
+        // succeeds on a later attempt.
+        assert!(is_transient(
+            "ERROR: [facebook] 912571498105335: Cannot parse data; please report this issue"
+        ));
+        assert!(is_transient("ERROR: unable to extract player response"));
+        assert!(is_transient("ERROR: Unable to download webpage: HTTP Error 503"));
+    }
+
+    #[test]
+    fn hopeless_failures_are_not_retried() {
+        // Retrying these only makes the user wait for the same answer.
+        for stderr in [
+            "ERROR: Unsupported URL: https://example.com/x",
+            "ERROR: This video is private",
+            "ERROR: HTTP Error 404: Not Found",
+            "ERROR: Sign in to confirm your age",
+        ] {
+            assert!(!is_transient(stderr), "would retry: {stderr}");
+        }
+    }
+
+    #[test]
+    fn a_permanent_reason_beats_a_retryable_one() {
+        // Login walls often say "unable to extract" too; the permanent reason
+        // has to win or we retry a wall three times.
+        assert!(!is_transient(
+            "ERROR: unable to extract data; login required to view this video"
+        ));
+    }
+
+    #[test]
+    fn parse_failure_copy_is_actionable() {
+        let message =
+            friendly_error("ERROR: [facebook] 123: Cannot parse data; please report this issue on https://github.com/yt-dlp/yt-dlp/issues");
+        assert_eq!(
+            message,
+            "This site returned an unexpected response. Please try again in a moment."
+        );
+        // Users must not be pointed at yt-dlp's bug tracker for this.
+        assert!(!message.contains("github"));
+        assert!(!message.contains("report"));
+    }
+
+    #[test]
+    fn there_is_a_backoff_for_every_retry() {
+        // One wait between each pair of attempts; a mismatch would panic on
+        // indexing RETRY_BACKOFF_MS at run time.
+        assert_eq!(RETRY_BACKOFF_MS.len(), METADATA_ATTEMPTS - 1);
+    }
+
 
     #[test]
     fn mp4_prefers_codecs_that_stay_audible() {
