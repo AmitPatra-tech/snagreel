@@ -145,15 +145,93 @@ impl QueueManager {
         let args =
             downloader::build_download_args(download, &settings, &out_dir, &print_path);
 
-        let command = app
-            .shell()
-            .sidecar("yt-dlp")
-            .map_err(|_| "yt-dlp is missing. Reinstall the app to restore it.".to_string())?
-            .args(args);
+        // Some sites intermittently serve a page the extractor can't read, so
+        // an identical request fails and then works. `--continue` is already in
+        // the args, so a retry resumes from whatever bytes landed rather than
+        // starting the file again.
+        let mut last_error = String::new();
+        for attempt in 0..DOWNLOAD_ATTEMPTS {
+            let _ = std::fs::remove_file(&print_path);
 
-        let (mut rx, child) = command
-            .spawn()
-            .map_err(|e| format!("Could not start yt-dlp: {e}"))?;
+            match self.run_attempt(app, download, &args).await {
+                AttemptOutcome::Success => {
+                    return self.collect_result(&print_path);
+                }
+                AttemptOutcome::Cancelled => {
+                    let _ = std::fs::remove_file(&print_path);
+                    return Err("Cancelled".into());
+                }
+                AttemptOutcome::Failed(stderr) => {
+                    last_error = stderr;
+                    let final_attempt = attempt + 1 == DOWNLOAD_ATTEMPTS;
+                    if final_attempt || !downloader::is_transient(&last_error) {
+                        break;
+                    }
+                    // Never sit in a backoff for something the user cancelled;
+                    // check both before and after waiting.
+                    if !self.is_active(download.id) {
+                        return Err("Cancelled".into());
+                    }
+                    tokio::time::sleep(Duration::from_millis(DOWNLOAD_BACKOFF_MS[attempt])).await;
+                    if !self.is_active(download.id) {
+                        return Err("Cancelled".into());
+                    }
+                }
+            }
+        }
+
+        let _ = std::fs::remove_file(&print_path);
+        Err(downloader::friendly_error(&last_error))
+    }
+
+    /// Read the path yt-dlp printed and turn it into the completed-download
+    /// tuple.
+    fn collect_result(
+        &self,
+        print_path: &std::path::Path,
+    ) -> Result<(String, String, Option<i64>), String> {
+        let file_path = std::fs::read_to_string(print_path)
+            .ok()
+            .and_then(|content| {
+                content
+                    .lines()
+                    .rev()
+                    .find(|l| !l.trim().is_empty())
+                    .map(|l| l.trim().to_string())
+            })
+            .ok_or_else(|| "Download finished but the output file was not found.".to_string())?;
+        let _ = std::fs::remove_file(print_path);
+
+        let metadata = std::fs::metadata(&file_path).ok();
+        let file_size = metadata.map(|m| m.len() as i64);
+        let filename = std::path::Path::new(&file_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| file_path.clone());
+
+        Ok((file_path, filename, file_size))
+    }
+
+    /// One yt-dlp invocation, start to exit.
+    async fn run_attempt(
+        &self,
+        app: &AppHandle,
+        download: &Download,
+        args: &[String],
+    ) -> AttemptOutcome {
+        let command = match app.shell().sidecar("yt-dlp") {
+            Ok(c) => c.args(args.to_vec()),
+            Err(_) => {
+                return AttemptOutcome::Failed(
+                    "yt-dlp is missing. Reinstall the app to restore it.".into(),
+                )
+            }
+        };
+
+        let (mut rx, child) = match command.spawn() {
+            Ok(v) => v,
+            Err(e) => return AttemptOutcome::Failed(format!("Could not start yt-dlp: {e}")),
+        };
 
         // If cancel/pause raced with the spawn, the map entry is gone:
         // kill the process we just started and bail out.
@@ -164,7 +242,7 @@ impl QueueManager {
                 None => {
                     drop(active);
                     let _ = child.kill();
-                    return Err("Cancelled".into());
+                    return AttemptOutcome::Cancelled;
                 }
             }
         }
@@ -218,33 +296,34 @@ impl QueueManager {
             }
         }
 
+        // A killed process is a cancel/pause, not a failure to retry: the
+        // handle is pulled from `active` before the kill, so its absence is
+        // how we tell the two apart.
+        if !self.is_active(download.id) {
+            return AttemptOutcome::Cancelled;
+        }
+
         if exit_code == Some(0) {
-            let file_path = std::fs::read_to_string(&print_path)
-                .ok()
-                .and_then(|content| {
-                    content
-                        .lines()
-                        .rev()
-                        .find(|l| !l.trim().is_empty())
-                        .map(|l| l.trim().to_string())
-                })
-                .ok_or_else(|| "Download finished but the output file was not found.".to_string())?;
-            let _ = std::fs::remove_file(&print_path);
-
-            let metadata = std::fs::metadata(&file_path).ok();
-            let file_size = metadata.map(|m| m.len() as i64);
-            let filename = std::path::Path::new(&file_path)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| file_path.clone());
-
-            Ok((file_path, filename, file_size))
+            AttemptOutcome::Success
         } else {
-            let _ = std::fs::remove_file(&print_path);
-            Err(downloader::friendly_error(&stderr_tail.join("\n")))
+            AttemptOutcome::Failed(stderr_tail.join("\n"))
         }
     }
 }
+
+/// How one yt-dlp invocation ended.
+enum AttemptOutcome {
+    Success,
+    /// The user cancelled or paused; do not retry, do not report an error.
+    Cancelled,
+    /// Raw stderr tail, so the caller can decide whether it is worth retrying.
+    Failed(String),
+}
+
+/// Attempts for a download, and the waits between them. Longer than the
+/// metadata backoff because a retry here can mean re-establishing a transfer.
+const DOWNLOAD_ATTEMPTS: usize = 3;
+const DOWNLOAD_BACKOFF_MS: [u64; 2] = [1000, 3000];
 
 pub fn emit_status(app: &AppHandle, id: i64, status: &str, error: Option<&str>) {
     let _ = app.emit(
@@ -255,4 +334,30 @@ pub fn emit_status(app: &AppHandle, id: i64, status: &str, error: Option<&str>) 
             error: error.map(String::from),
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DOWNLOAD_ATTEMPTS, DOWNLOAD_BACKOFF_MS};
+
+    #[test]
+    fn there_is_a_backoff_for_every_download_retry() {
+        // `DOWNLOAD_BACKOFF_MS[attempt]` is indexed once per retry, so a
+        // mismatch here is an out-of-bounds panic mid-download rather than a
+        // compile error.
+        assert_eq!(DOWNLOAD_BACKOFF_MS.len(), DOWNLOAD_ATTEMPTS - 1);
+    }
+
+    #[test]
+    fn a_cancelled_download_is_not_retried() {
+        // Guard against someone "simplifying" the Cancelled arm away: the
+        // outcome enum must keep cancellation distinct from failure, or a
+        // paused download would be retried behind the user's back.
+        fn is_retryable(outcome: &super::AttemptOutcome) -> bool {
+            matches!(outcome, super::AttemptOutcome::Failed(_))
+        }
+        assert!(!is_retryable(&super::AttemptOutcome::Cancelled));
+        assert!(!is_retryable(&super::AttemptOutcome::Success));
+        assert!(is_retryable(&super::AttemptOutcome::Failed("boom".into())));
+    }
 }
