@@ -32,19 +32,59 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # gyan.dev is a small host that returns 503 under load and has failed a
+      # release build before, so every fetch retries and ffmpeg falls back to a
+      # GitHub-hosted mirror. Both are GPL builds, so this does not change what
+      # we ship.
       - name: Fetch sidecars (yt-dlp + ffmpeg)
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force -Path src-tauri/binaries | Out-Null
-          Invoke-WebRequest `
-            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" `
+
+          function Get-FileWithRetry {
+            param([string[]]$Urls, [string]$OutFile, [int]$Attempts = 4)
+            foreach ($url in $Urls) {
+              for ($i = 1; $i -le $Attempts; $i++) {
+                try {
+                  Write-Host "Downloading $url (attempt $i)"
+                  Invoke-WebRequest $url -OutFile $OutFile -UseBasicParsing
+                  Write-Host "  ok -> $OutFile"
+                  return
+                } catch {
+                  Write-Host "  failed: $($_.Exception.Message)"
+                  if ($i -lt $Attempts) { Start-Sleep -Seconds (5 * $i) }
+                }
+              }
+              Write-Host "Giving up on $url, trying next source"
+            }
+            throw "All sources failed for $OutFile"
+          }
+
+          Get-FileWithRetry `
+            -Urls @("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe") `
             -OutFile "src-tauri/binaries/yt-dlp-x86_64-pc-windows-msvc.exe"
-          Invoke-WebRequest `
-            "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" `
-            -OutFile "ffmpeg.zip"
+
+          Get-FileWithRetry -Urls @(
+            "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+          ) -OutFile "ffmpeg.zip"
+
           Expand-Archive "ffmpeg.zip" -DestinationPath "ffmpeg_extract" -Force
           $exe = Get-ChildItem "ffmpeg_extract" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          if (-not $exe) { throw "ffmpeg.exe not found in the downloaded archive" }
           Copy-Item $exe.FullName "src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe"
+
+          # A truncated or HTML-error-page download would otherwise sail through
+          # to a broken installer.
+          foreach ($f in @(
+            "src-tauri/binaries/yt-dlp-x86_64-pc-windows-msvc.exe",
+            "src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe"
+          )) {
+            $size = (Get-Item $f).Length
+            Write-Host "$f = $size bytes"
+            if ($size -lt 1MB) { throw "$f is implausibly small ($size bytes)" }
+          }
 
       - name: Build, sign & publish release (with updater manifest)
         uses: tauri-apps/tauri-action@v0
