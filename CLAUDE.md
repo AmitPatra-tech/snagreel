@@ -24,7 +24,7 @@ Bump **all three** in lockstep when releasing, then run the release workflow in
 - `src-tauri/tauri.conf.json` (`version` — this is what the updater compares)
 - `src-tauri/Cargo.toml` (`version`)
 
-Current version: **1.0.1**.
+Current version: **1.0.2**.
 
 ## Sidecars
 
@@ -43,6 +43,21 @@ anywhere in the pipeline. Fixed by making the `-f` selector container-aware:
 prefer AVC+AAC for mp4, VP9+Opus for webm, mkv stays unconstrained, all tiers
 fall back to `bestvideo+bestaudio/best` so nothing fails to download. Covered by
 unit tests in the same file.
+
+## Output filename length (fixed 2026-08-13)
+
+`src-tauri/src/downloader/mod.rs` — `trim_filenames_len()`. Facebook, Instagram
+and TikTok return the whole post caption as `%(title)s`, so `%(title)s.%(ext)s`
+produced paths past the Windows limits (255 per component, 260 total) and the
+download died with `unable to open for writing: [Errno 22] Invalid argument`.
+`--windows-filenames` does not help — it only removes illegal characters, and
+nothing in yt-dlp shortens a name — so we pass `--trim-filenames` as well.
+
+Note `--trim-filenames` slices the **whole rendered path**, folder included, not
+just the base name (verified against the shipped binary), which is why the limit
+is computed from `out_dir` rather than being a constant. Budget is deliberately
+200, not 260: yt-dlp counts characters while Windows counts UTF-16 units, and
+these captions are full of emoji that cost two apiece.
 
 ## Pro licensing architecture (rebuilt 2026-08-07/08)
 

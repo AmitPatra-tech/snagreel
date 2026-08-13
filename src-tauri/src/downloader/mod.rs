@@ -60,6 +60,11 @@ pub fn friendly_error(stderr: &str) -> String {
     if lower.contains("no space left") || lower.contains("disk full") {
         return "Not enough disk space to finish the download.".into();
     }
+    if lower.contains("unable to open for writing") || lower.contains("errno 22") {
+        // Almost always the file name: sites like Facebook hand back the whole
+        // post caption as the title, and Windows refuses a name that long.
+        return "The name from this page was too long for Windows. Try the download again — it will be saved under a shorter name.".into();
+    }
     if lower.contains("ffmpeg") && (lower.contains("not found") || lower.contains("not installed"))
     {
         return "FFmpeg is missing. Reinstall the app to restore it.".into();
@@ -334,6 +339,35 @@ fn video_format_selector(height: Option<&str>, container: &str) -> String {
     tiers.join("/")
 }
 
+/// Longest output path we let yt-dlp produce, in characters.
+///
+/// Windows caps a single path component at 255 characters and the whole path at
+/// 260 unless long paths are enabled. Facebook, Instagram and TikTok return the
+/// entire post caption as `%(title)s`, which sails past both limits — the write
+/// then fails with a bare "unable to open for writing: [Errno 22] Invalid
+/// argument", which tells the user nothing and never succeeds on retry.
+///
+/// Kept well under 260 because yt-dlp counts characters while Windows counts
+/// UTF-16 units, and the emoji these captions are full of cost two apiece.
+const MAX_PATH_CHARS: usize = 200;
+
+/// Room to leave for what yt-dlp appends after the template: the format id
+/// (`.f399`), the extension, and the `.part`/`.temp` working suffixes.
+const PATH_SUFFIX_HEADROOM: usize = 30;
+
+/// Never squeeze the title below this, even from a deeply nested folder — a
+/// valid long path beats a truncated one.
+const MIN_FILENAME_CHARS: usize = 40;
+
+/// Value for `--trim-filenames`, which caps the rendered output path (folder
+/// included — yt-dlp slices the whole string, not just the base name).
+fn trim_filenames_len(out_dir: &Path) -> usize {
+    let dir_chars = out_dir.to_string_lossy().chars().count() + 1; // + separator
+    MAX_PATH_CHARS
+        .saturating_sub(PATH_SUFFIX_HEADROOM)
+        .max(dir_chars + MIN_FILENAME_CHARS)
+}
+
 /// Build the yt-dlp argument list for a queued download.
 pub fn build_download_args(
     download: &Download,
@@ -358,6 +392,10 @@ pub fn build_download_args(
             .join(&settings.filename_template)
             .to_string_lossy()
             .into_owned(),
+        // `--windows-filenames` only removes illegal characters; nothing in
+        // yt-dlp shortens an over-long name, so ask for it explicitly.
+        "--trim-filenames".into(),
+        trim_filenames_len(out_dir).to_string(),
     ];
 
     #[cfg(target_os = "windows")]
@@ -417,8 +455,51 @@ pub fn build_download_args(
 
 #[cfg(test)]
 mod tests {
-    use super::{friendly_error, is_transient, video_format_selector, METADATA_ATTEMPTS,
+    use std::path::Path;
+
+    use super::{build_download_args, friendly_error, is_transient, trim_filenames_len,
+                video_format_selector, MAX_PATH_CHARS, METADATA_ATTEMPTS, MIN_FILENAME_CHARS,
                 RETRY_BACKOFF_MS};
+    use crate::models::{Download, Settings};
+
+    fn a_download() -> Download {
+        Download {
+            id: 1,
+            url: "https://www.facebook.com/watch/?v=1".into(),
+            title: "A parrot".into(),
+            platform: "facebook".into(),
+            thumbnail: None,
+            filename: None,
+            file_path: None,
+            format: "mp4".into(),
+            resolution: Some("1080p".into()),
+            audio_only: false,
+            duration: None,
+            file_size: None,
+            status: "queued".into(),
+            error: None,
+            created_at: String::new(),
+            completed_at: None,
+            priority: 0,
+            position: 0,
+            clip_start: None,
+            clip_end: None,
+        }
+    }
+
+    fn settings_with(download_path: &str) -> Settings {
+        Settings {
+            download_path: download_path.into(),
+            theme: "dark".into(),
+            language: "en".into(),
+            max_concurrent_downloads: 2,
+            auto_update: true,
+            notifications: true,
+            filename_template: "%(title)s.%(ext)s".into(),
+            organize_by_platform: false,
+            cookies_browser: "none".into(),
+        }
+    }
 
     #[test]
     fn parse_failures_are_retried() {
@@ -473,6 +554,52 @@ mod tests {
         assert_eq!(RETRY_BACKOFF_MS.len(), METADATA_ATTEMPTS - 1);
     }
 
+
+    #[test]
+    fn long_titles_are_trimmed_to_a_writable_length() {
+        // A Facebook caption used as the title: Windows rejects the whole path
+        // with "[Errno 22] Invalid argument" long before it reaches disk.
+        let len = trim_filenames_len(Path::new("D:\\Saved Videos"));
+        assert!(len <= MAX_PATH_CHARS, "leaves no room for .f399.mp4.part");
+        // The folder eats into the same budget, so the title must still get a
+        // usable share of it.
+        assert!(len > "D:\\Saved Videos".chars().count() + MIN_FILENAME_CHARS);
+    }
+
+    #[test]
+    fn a_deep_folder_never_truncates_the_folder_itself() {
+        // yt-dlp slices the rendered path as one string, so a limit shorter
+        // than the folder would silently write somewhere else — or nowhere.
+        let deep = format!("D:\\{}", "nested\\".repeat(40));
+        let len = trim_filenames_len(Path::new(&deep));
+        assert!(len >= deep.chars().count() + MIN_FILENAME_CHARS);
+    }
+
+    #[test]
+    fn downloads_ask_yt_dlp_to_trim() {
+        let args = build_download_args(
+            &a_download(),
+            &settings_with("D:\\Saved Videos"),
+            Path::new("D:\\Saved Videos"),
+            Path::new("C:\\cache\\out.txt"),
+        );
+        let at = args.iter().position(|a| a == "--trim-filenames").expect(
+            "without this, an over-long title fails the download permanently",
+        );
+        assert_eq!(
+            args[at + 1],
+            trim_filenames_len(Path::new("D:\\Saved Videos")).to_string()
+        );
+    }
+
+    #[test]
+    fn an_unwritable_name_does_not_leak_python_errno_text() {
+        let message = friendly_error(
+            "ERROR: unable to open for writing: [Errno 22] Invalid argument: 'D:\\\\Saved Videos\\\\39M views 1.2M reactions When the parrot...'",
+        );
+        assert!(message.contains("too long"), "{message}");
+        assert!(!message.contains("Errno"), "{message}");
+    }
 
     #[test]
     fn mp4_prefers_codecs_that_stay_audible() {
