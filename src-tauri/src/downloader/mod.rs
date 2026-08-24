@@ -352,7 +352,8 @@ fn video_format_selector(height: Option<&str>, container: &str) -> String {
 const MAX_PATH_CHARS: usize = 200;
 
 /// Room to leave for what yt-dlp appends after the template: the format id
-/// (`.f399`), the extension, and the `.part`/`.temp` working suffixes.
+/// (Facebook's run to `.f1769057684235718v`), the extension, and the
+/// `.part`/`.temp` working suffixes.
 const PATH_SUFFIX_HEADROOM: usize = 30;
 
 /// Never squeeze the title below this, even from a deeply nested folder — a
@@ -361,11 +362,50 @@ const MIN_FILENAME_CHARS: usize = 40;
 
 /// Value for `--trim-filenames`, which caps the rendered output path (folder
 /// included — yt-dlp slices the whole string, not just the base name).
+///
+/// Only a backstop for fields other than the title: see [`bounded_template`]
+/// for why this option cannot be trusted on its own.
 fn trim_filenames_len(out_dir: &Path) -> usize {
     let dir_chars = out_dir.to_string_lossy().chars().count() + 1; // + separator
     MAX_PATH_CHARS
         .saturating_sub(PATH_SUFFIX_HEADROOM)
         .max(dir_chars + MIN_FILENAME_CHARS)
+}
+
+/// How many characters of `%(title)s` fit in the path, after the folder and
+/// everything yt-dlp appends have taken their share.
+fn title_budget(out_dir: &Path) -> usize {
+    let dir_chars = out_dir.to_string_lossy().chars().count() + 1; // + separator
+    MAX_PATH_CHARS
+        .saturating_sub(dir_chars + PATH_SUFFIX_HEADROOM)
+        .max(MIN_FILENAME_CHARS)
+}
+
+/// Bound the title *inside* the output template, as `%(title).150s`.
+///
+/// `--trim-filenames` alone does not work, and fails in a way that looks
+/// random. yt-dlp implements it as
+///
+/// ```python
+/// no_ext, *ext = filename.rsplit('.', 2)
+/// filename = join_nonempty(no_ext[:trim_file_name], *ext, delim='.')
+/// ```
+///
+/// — it splits the *whole path* on the last two dots and truncates only the
+/// part before them, then glues the rest back on untouched. One dot anywhere
+/// in the caption ("3.9M views", "TalkyParrot 2.0") leaves almost nothing on
+/// the left of that split, so the truncation does nothing and the full name is
+/// reassembled. The same Facebook reel therefore succeeds while the view count
+/// reads "4M views" and fails once it ticks over to "3.9M views".
+///
+/// Template precision truncates the field itself, before any of that, so no
+/// caption can defeat it.
+fn bounded_template(template: &str, out_dir: &Path) -> String {
+    // A template that already carries its own precision is left alone.
+    template.replace(
+        "%(title)s",
+        &format!("%(title).{}s", title_budget(out_dir)),
+    )
 }
 
 /// Build the yt-dlp argument list for a queued download.
@@ -389,11 +429,12 @@ pub fn build_download_args(
         print_path.to_string_lossy().into_owned(),
         "-o".into(),
         out_dir
-            .join(&settings.filename_template)
+            .join(bounded_template(&settings.filename_template, out_dir))
             .to_string_lossy()
             .into_owned(),
         // `--windows-filenames` only removes illegal characters; nothing in
-        // yt-dlp shortens an over-long name, so ask for it explicitly.
+        // yt-dlp shortens an over-long name. This bounds every field other
+        // than the title, which `bounded_template` has already capped.
         "--trim-filenames".into(),
         trim_filenames_len(out_dir).to_string(),
     ];
@@ -457,9 +498,9 @@ pub fn build_download_args(
 mod tests {
     use std::path::Path;
 
-    use super::{build_download_args, friendly_error, is_transient, trim_filenames_len,
-                video_format_selector, MAX_PATH_CHARS, METADATA_ATTEMPTS, MIN_FILENAME_CHARS,
-                RETRY_BACKOFF_MS};
+    use super::{bounded_template, build_download_args, friendly_error, is_transient,
+                title_budget, trim_filenames_len, video_format_selector, MAX_PATH_CHARS,
+                METADATA_ATTEMPTS, MIN_FILENAME_CHARS, RETRY_BACKOFF_MS};
     use crate::models::{Download, Settings};
 
     fn a_download() -> Download {
@@ -576,6 +617,44 @@ mod tests {
     }
 
     #[test]
+    fn the_title_is_capped_inside_the_template() {
+        // `--trim-filenames` is defeated by a single dot in the caption, so the
+        // cap has to live in the template where no title can reach it.
+        let tmpl = bounded_template("%(title)s.%(ext)s", Path::new("D:\\Saved Videos"));
+        assert_eq!(tmpl, "%(title).154s.%(ext)s");
+    }
+
+    #[test]
+    fn a_template_without_a_title_is_left_alone() {
+        let tmpl = bounded_template("%(id)s.%(ext)s", Path::new("D:\\Saved Videos"));
+        assert_eq!(tmpl, "%(id)s.%(ext)s");
+    }
+
+    #[test]
+    fn an_existing_precision_is_not_doubled() {
+        // Only the bare field is rewritten, so a user who already capped the
+        // title keeps their own number.
+        let tmpl = bounded_template("%(title).50s.%(ext)s", Path::new("D:\\Saved Videos"));
+        assert_eq!(tmpl, "%(title).50s.%(ext)s");
+    }
+
+    #[test]
+    fn the_title_cap_leaves_room_for_the_rest_of_the_path() {
+        let dir = Path::new("D:\\Saved Videos");
+        // Folder + title + the longest suffix yt-dlp appends (a Facebook format
+        // id, the extension and `.part`) must still clear the Windows limits.
+        let worst = dir.as_os_str().len() + 1 + title_budget(dir) + ".f1769057684235718v.mp4.part".len();
+        assert!(worst < 255, "component would be rejected: {worst}");
+        assert!(worst < 260, "path would be rejected: {worst}");
+    }
+
+    #[test]
+    fn a_deep_folder_still_leaves_a_usable_title() {
+        let deep = format!("D:\\{}", "nested\\".repeat(40));
+        assert_eq!(title_budget(Path::new(&deep)), MIN_FILENAME_CHARS);
+    }
+
+    #[test]
     fn downloads_ask_yt_dlp_to_trim() {
         let args = build_download_args(
             &a_download(),
@@ -590,6 +669,10 @@ mod tests {
             args[at + 1],
             trim_filenames_len(Path::new("D:\\Saved Videos")).to_string()
         );
+
+        // …and the output template carries the cap that actually holds.
+        let out = args.iter().position(|a| a == "-o").expect("no -o");
+        assert!(args[out + 1].contains("%(title).154s"), "{}", args[out + 1]);
     }
 
     #[test]

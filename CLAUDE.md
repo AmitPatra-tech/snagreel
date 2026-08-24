@@ -44,20 +44,40 @@ prefer AVC+AAC for mp4, VP9+Opus for webm, mkv stays unconstrained, all tiers
 fall back to `bestvideo+bestaudio/best` so nothing fails to download. Covered by
 unit tests in the same file.
 
-## Output filename length (fixed 2026-08-13)
+## Output filename length (fixed 2026-08-13, properly fixed 2026-08-24)
 
-`src-tauri/src/downloader/mod.rs` — `trim_filenames_len()`. Facebook, Instagram
+`src-tauri/src/downloader/mod.rs` — `bounded_template()`. Facebook, Instagram
 and TikTok return the whole post caption as `%(title)s`, so `%(title)s.%(ext)s`
 produced paths past the Windows limits (255 per component, 260 total) and the
 download died with `unable to open for writing: [Errno 22] Invalid argument`.
-`--windows-filenames` does not help — it only removes illegal characters, and
-nothing in yt-dlp shortens a name — so we pass `--trim-filenames` as well.
+`--windows-filenames` does not help: it only removes illegal characters, and
+nothing in yt-dlp shortens a name.
 
-Note `--trim-filenames` slices the **whole rendered path**, folder included, not
-just the base name (verified against the shipped binary), which is why the limit
-is computed from `out_dir` rather than being a constant. Budget is deliberately
-200, not 260: yt-dlp counts characters while Windows counts UTF-16 units, and
-these captions are full of emoji that cost two apiece.
+**`--trim-filenames` does not fix this on its own, and fails in a way that looks
+random.** yt-dlp implements it as
+
+```python
+no_ext, *ext = filename.rsplit('.', 2)
+filename = join_nonempty(no_ext[:trim_file_name], *ext, delim='.')
+```
+
+It splits the **whole rendered path** on the last two dots and truncates only
+the part before them, then glues the rest back untouched. One dot anywhere in
+the caption — `3.9M views`, `1.2M reactions`, `TalkyParrot 2.0` — leaves almost
+nothing left of that split, so the truncation is a no-op. The same reel
+downloads fine while the counter reads `4M views` and fails the moment it ticks
+to `4.1M views`. 1.0.3 shipped with only this option and did not fix the bug.
+
+The cap that holds is **output-template precision**: `bounded_template()`
+rewrites `%(title)s` to `%(title).<N>s`, which truncates the field before any
+path assembly, so no caption can defeat it. `--trim-filenames` is still passed
+as a backstop for other unbounded fields. `N` is computed from `out_dir`, and
+the budget is deliberately 200 rather than 260: yt-dlp counts characters while
+Windows counts UTF-16 units, and these captions are full of emoji that cost two
+apiece.
+
+Verify a change here against a **real** caption with a dot in it — a synthetic
+title without one takes the working path and proves nothing.
 
 ## Pro licensing architecture (rebuilt 2026-08-07/08)
 
