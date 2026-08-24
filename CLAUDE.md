@@ -24,7 +24,7 @@ Bump **all three** in lockstep when releasing, then run the release workflow in
 - `src-tauri/tauri.conf.json` (`version` — this is what the updater compares)
 - `src-tauri/Cargo.toml` (`version`)
 
-Current version: **1.0.3**.
+Current version: **1.0.4**.
 
 ## Sidecars
 
