@@ -41,16 +41,53 @@ Releases are public so end users' apps can download updates.
 
 ## Cutting a new version (e.g. v2)
 
-1. In the private repo, bump the version in **`src-tauri/tauri.conf.json`**
-   (`"version"`) and in `package.json`. Commit and push.
+1. In the source repo, bump the version in **all three** of
+   `src-tauri/tauri.conf.json`, `package.json` and `src-tauri/Cargo.toml`, run
+   `cargo test --lib` so `Cargo.lock` follows, and commit + push.
 2. Go to the **`snagreel-releases`** repo → **Actions → Release Snagreel → Run
-   workflow**, and enter the source ref to build (a tag or `main`).
-3. The workflow checks out the private source, builds the signed installer,
+   workflow**, and enter the source ref to build (a tag, `main`, or a **full**
+   commit SHA).
+3. The workflow checks out the source, builds the signed installer,
    generates `latest.json`, and publishes a public GitHub Release.
 4. Existing Snagreel installs will detect it on next launch and prompt to update.
 
 > The updater endpoint always resolves to the **latest** release, so you only
 > ever need to publish a newer version — no client changes required.
+
+### From the CLI
+
+```powershell
+git push origin main
+$sha = git rev-parse main
+gh workflow run "Release Snagreel" --repo AmitPatra-tech/snagreel-releases -f ref=$sha
+gh run list --repo AmitPatra-tech/snagreel-releases --workflow "Release Snagreel" --limit 1
+gh run watch <run-id> --repo AmitPatra-tech/snagreel-releases --exit-status --interval 30
+```
+
+A clean build takes **~10 minutes**.
+
+### Gotchas
+
+- **The `ref` input must be a branch, a tag, or a *full* 40-character SHA.**
+  `actions/checkout` does not resolve short SHAs: it expands whatever you give
+  it into `+refs/heads/<ref>*:…` / `+refs/tags/<ref>*:…`, matches nothing, and
+  fails after three fetch attempts (~41s) with only
+  `The process '…git.exe' failed with exit code 1`. Use `git rev-parse main`,
+  never the 7-character hash you see in `git log --oneline`.
+- **The tag and release name come from the built source**, not from the input:
+  the workflow uses `tagName: v__VERSION__`, which `tauri-action` fills from
+  `tauri.conf.json`. Forgetting the version bump republishes the existing tag.
+- `releaseDraft: false` — the release is **public the moment the job succeeds**.
+- Always verify the endpoint clients actually poll, not just the release page:
+
+  ```powershell
+  Invoke-RestMethod "https://github.com/AmitPatra-tech/snagreel-releases/releases/latest/download/latest.json"
+  ```
+
+  `version` must be the new one and `platforms.windows-x86_64.signature` must be
+  non-empty, or installed apps will not update.
+- A `Node.js 20 is deprecated` annotation on the run is expected and harmless
+  (`actions/checkout@v4`, `actions/setup-node@v4` are forced onto Node 24).
 
 ## Sidecars
 

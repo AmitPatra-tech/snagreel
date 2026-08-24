@@ -9,7 +9,7 @@ product pages.
 
 ## Repos
 
-- **`snagreel`** (this repo, currently **private**) — source code.
+- **`snagreel`** (this repo, **public** since 2026-08-08) — source code.
   `https://github.com/AmitPatra-tech/snagreel`
 - **`snagreel-releases`** (public) — hosts installers + the updater manifest
   (`latest.json`). Release workflow: `.github/workflows/release.yml` in that repo,
@@ -24,13 +24,83 @@ Bump **all three** in lockstep when releasing, then run the release workflow in
 - `src-tauri/tauri.conf.json` (`version` — this is what the updater compares)
 - `src-tauri/Cargo.toml` (`version`)
 
+Then run `cargo test --lib` so `src-tauri/Cargo.lock` picks up the new version
+and gets committed with them, and update "Current version" just below.
+
 Current version: **1.0.4**.
+
+Release in one go (see [RELEASING.md](RELEASING.md) for the gotchas):
+
+```powershell
+git push origin main
+$sha = git rev-parse main          # MUST be the full 40 chars
+gh workflow run "Release Snagreel" --repo AmitPatra-tech/snagreel-releases -f ref=$sha
+gh run watch <run-id> --repo AmitPatra-tech/snagreel-releases --exit-status --interval 30
+Invoke-RestMethod "https://github.com/AmitPatra-tech/snagreel-releases/releases/latest/download/latest.json"
+```
 
 ## Sidecars
 
 `yt-dlp` and `ffmpeg` binaries are gitignored, not committed. Release workflow
 downloads them automatically. For local dev, place them in
 `src-tauri/binaries/` (see README).
+
+**The dev and installed binaries have different names**, which matters when
+reproducing a bug:
+
+| | dev tree | installed app |
+|---|---|---|
+| folder | `src-tauri/binaries/` | `C:\Users\80939\AppData\Local\Snagreel\` |
+| names | `yt-dlp-x86_64-pc-windows-msvc.exe`, `ffmpeg-…msvc.exe` | `yt-dlp.exe`, `ffmpeg.exe` |
+
+`sidecar_dir()` in `downloader/mod.rs` only passes `--ffmpeg-location` when
+**`ffmpeg.exe`** exists in that folder, so in a dev tree it is never passed.
+Point `--ffmpeg-location` at a folder holding a copy literally named
+`ffmpeg.exe` when reproducing by hand, or yt-dlp downloads both streams and
+silently skips the merge — leaving `.f<id>.mp4` + `.f<id>.m4a` and **exit code
+0**. The explanation ("ffmpeg is not installed. The formats won't be merged")
+is a *warning*, and the app passes `--no-warnings`, so nothing surfaces. Drop
+`--no-warnings` first whenever a download "succeeds" with no output file.
+
+## Debugging a failed download
+
+The app stores only the *friendly* message, so start from its database rather
+than from what the UI shows. Copy it first — the app holds a WAL lock.
+
+```powershell
+$dst = "$env:TEMP\snagreel-dbg"; New-Item -ItemType Directory -Force $dst | Out-Null
+Copy-Item "$env:APPDATA\com.snagreel.app\app.db*" $dst -Force
+python -c "import sqlite3;c=sqlite3.connect(r'$dst\app.db');[print(r) for r in c.execute('select id,status,length(title),substr(title,1,60),file_path,error,created_at from downloads order by id desc limit 8')];[print(r) for r in c.execute('select download_path,filename_template,organize_by_platform from settings where id=1')]"
+```
+
+`settings` gives the three inputs that decide the output path
+(`download_path`, `filename_template`, `organize_by_platform`); `downloads.error`
+on **older** rows often still holds the raw yt-dlp text, which is the real
+evidence. There is no `sqlite3` CLI on this machine — `python` is on PATH.
+
+Which build is actually running (the UI shows no version in a failure):
+
+```powershell
+Get-ItemProperty "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" |
+  Where-Object DisplayName -like "*Snagreel*" | Select DisplayName,DisplayVersion,InstallLocation
+```
+
+Reproducing a path-length bug **requires matching the user's folder length** —
+`D:\Saved Videos` is 15 characters, so test in a folder of the same length
+(e.g. `D:\SnagreelTest`), not in a deep temp path where the budget maths differ
+and the bug hides. For deterministic offline runs, feed a crafted title through
+`--load-info-json` (write the JSON as UTF-8 **without BOM**, or yt-dlp dies on
+`Unexpected UTF-8 BOM`):
+
+```powershell
+[System.IO.File]::WriteAllText("$p\i.json", $json, (New-Object System.Text.UTF8Encoding($false)))
+& $yt --load-info-json "$p\i.json" --simulate --print filename -o "D:\SnagreelTest\%(title)s.%(ext)s" --windows-filenames
+```
+
+Facebook captions are **live** — the view/reaction counter changes between runs,
+so the same URL yields a different title (and a different filename) minutes
+apart. Never conclude "fixed" from one passing run; check whether the title that
+passed contained a dot (see the filename-length section below).
 
 ## Video download format selection (fixed 2026-08-07)
 
