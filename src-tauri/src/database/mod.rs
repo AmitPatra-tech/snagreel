@@ -85,7 +85,7 @@ impl Db {
                     download_path             TEXT NOT NULL,
                     theme                     TEXT NOT NULL DEFAULT 'dark',
                     language                  TEXT NOT NULL DEFAULT 'en',
-                    max_concurrent_downloads  INTEGER NOT NULL DEFAULT 3,
+                    max_concurrent_downloads  INTEGER NOT NULL DEFAULT 12,
                     auto_update               INTEGER NOT NULL DEFAULT 1,
                     notifications             INTEGER NOT NULL DEFAULT 1,
                     filename_template         TEXT NOT NULL DEFAULT '%(title)s.%(ext)s',
@@ -141,6 +141,20 @@ impl Db {
                 ALTER TABLE settings ADD COLUMN pro_key TEXT;
                 ALTER TABLE settings ADD COLUMN device_id TEXT;
                 PRAGMA user_version = 4;
+                COMMIT;",
+            )?;
+        }
+
+        if version < 5 {
+            // Multi-link pastes made the old ceiling of 3 the thing users hit
+            // first, so the default moved to 12. Only installs still sitting on
+            // that old default are moved up — anyone who picked their own
+            // number keeps it.
+            conn.execute_batch(
+                "BEGIN;
+                UPDATE settings SET max_concurrent_downloads = 12
+                    WHERE max_concurrent_downloads = 3;
+                PRAGMA user_version = 5;
                 COMMIT;",
             )?;
         }
@@ -539,7 +553,8 @@ impl Db {
                 s.download_path,
                 s.theme,
                 s.language,
-                s.max_concurrent_downloads.clamp(1, 10),
+                s.max_concurrent_downloads
+                    .clamp(1, crate::models::MAX_CONCURRENT_DOWNLOADS),
                 s.auto_update as i64,
                 s.notifications as i64,
                 s.filename_template,

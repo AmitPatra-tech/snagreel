@@ -27,7 +27,7 @@ Bump **all three** in lockstep when releasing, then run the release workflow in
 Then run `cargo test --lib` so `src-tauri/Cargo.lock` picks up the new version
 and gets committed with them, and update "Current version" just below.
 
-Current version: **1.0.4**.
+Current version: **1.1.0**.
 
 Release in one go (see [RELEASING.md](RELEASING.md) for the gotchas):
 
@@ -148,6 +148,37 @@ apiece.
 
 Verify a change here against a **real** caption with a dot in it — a synthetic
 title without one takes the working path and proves nothing.
+
+## Multi-link pastes (added 2026-08-24)
+
+Paste up to **12** links separated by commas (newlines, tabs and spaces work
+too — a valid URL cannot contain an unencoded space or comma, so splitting on
+them never breaks one).
+
+- `src/lib/urls.ts` — `parseUrls()`, the only place input is split. Returns
+  `urls` / `invalid` / `overflow` so the UI can *say* what it skipped instead of
+  silently downloading fewer than were pasted. De-duplicates.
+- `src/components/BatchDialog.tsx` — shown for 2+ links. Two modes: **Choose per
+  link** (the default; every row is pre-filled, so accepting all is still one
+  click) and **Same for all**. A playlist link inside a batch expands to one
+  download per entry, matching the single-link dialog. Links that failed to read
+  are listed but cannot be ticked; links already in the library are ticked off by
+  default.
+- `src/components/UrlBar.tsx` — one link keeps the original single-link path
+  untouched. Batches read metadata `METADATA_CONCURRENCY` (4) at a time: reading
+  12 sequentially is a ~40s spinner, reading 12 at once spawns 12 yt-dlp
+  processes and invites throttling.
+
+**Two limits, both 12, deliberately kept equal but defined separately** —
+`MAX_BATCH_LINKS` in `src/lib/urls.ts` (links per paste) and
+`MAX_CONCURRENT_DOWNLOADS` in `src-tauri/src/models/mod.rs` (workers). The Rust
+one is the real ceiling: `update_settings` and the queue scheduler both clamp to
+it, so a hand-edited database cannot exceed it. `Settings.tsx` mirrors it in the
+zod schema and the dropdown — change all three together.
+
+Schema v5 moves existing installs from the old default of 3 to 12, but **only
+where the stored value is still exactly 3**, so anyone who picked their own
+number keeps it.
 
 ## Pro licensing architecture (rebuilt 2026-08-07/08)
 

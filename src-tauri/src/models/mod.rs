@@ -1,5 +1,14 @@
 use serde::{Deserialize, Serialize};
 
+/// How many downloads may run at the same time — both the ceiling the settings
+/// screen allows and the default a fresh install gets.
+///
+/// Sites throttle: a dozen parallel requests to the same host is enough for
+/// Facebook or Instagram to start refusing them, so the queue running fewer at
+/// once is often *faster* end to end. The batch paste limit in
+/// `src/lib/urls.ts` is deliberately the same number.
+pub const MAX_CONCURRENT_DOWNLOADS: i64 = 12;
+
 /// A row in the `downloads` table, joined with its optional `queue` row.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Download {

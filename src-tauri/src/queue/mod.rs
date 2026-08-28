@@ -63,7 +63,10 @@ impl QueueManager {
         let db = app.state::<Db>();
         let max = db
             .get_settings()
-            .map(|s| s.max_concurrent_downloads.clamp(1, 10) as usize)
+            .map(|s| {
+                s.max_concurrent_downloads
+                    .clamp(1, crate::models::MAX_CONCURRENT_DOWNLOADS) as usize
+            })
             .unwrap_or(3);
 
         loop {

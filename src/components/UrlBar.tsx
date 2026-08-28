@@ -12,24 +12,30 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { MetadataDialog } from "@/components/MetadataDialog";
+import { BatchDialog, type BatchItem } from "@/components/BatchDialog";
 import { api } from "@/services/api";
+import { MAX_BATCH_LINKS, parseUrls } from "@/lib/urls";
 import type { Download, MediaInfo } from "@/types";
 
-function looksLikeUrl(value: string): boolean {
-  try {
-    const url = new URL(value.trim());
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
+/**
+ * Links read at once while building a batch.
+ *
+ * Reading twelve one after another leaves the user watching a spinner for the
+ * better part of a minute; reading all twelve at once means twelve yt-dlp
+ * processes and a good chance the site starts refusing them. Four is quick
+ * without looking like an attack.
+ */
+const METADATA_CONCURRENCY = 4;
 
 export function UrlBar({ autoFocus = false }: { autoFocus?: boolean }) {
   const navigate = useNavigate();
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [info, setInfo] = useState<MediaInfo | null>(null);
+  const [batch, setBatch] = useState<BatchItem[] | null>(null);
   const [duplicate, setDuplicate] = useState<Download | null>(null);
 
   const fetchMetadata = async (target: string) => {
@@ -45,13 +51,74 @@ export function UrlBar({ autoFocus = false }: { autoFocus?: boolean }) {
     }
   };
 
+  /** Read every link in the batch, a few at a time, keeping the typed order. */
+  const readBatch = async (targets: string[]) => {
+    setLoading(true);
+    setProgress({ done: 0, total: targets.length });
+    const items: BatchItem[] = [];
+    try {
+      for (let i = 0; i < targets.length; i += METADATA_CONCURRENCY) {
+        const slice = targets.slice(i, i + METADATA_CONCURRENCY);
+        const read = await Promise.all(
+          slice.map(async (target): Promise<BatchItem> => {
+            // Best-effort: a failed duplicate check should not fail the link.
+            const duplicate = await api.checkDuplicate(target).catch(() => null);
+            try {
+              return { url: target, info: await api.fetchMetadata(target), error: null, duplicate };
+            } catch (e) {
+              return {
+                url: target,
+                info: null,
+                error: typeof e === "string" ? e : "Could not read this link.",
+                duplicate,
+              };
+            }
+          }),
+        );
+        items.push(...read);
+        setProgress({ done: items.length, total: targets.length });
+      }
+      // Every link failing is an error, not a batch worth confirming.
+      if (items.every((item) => item.info == null)) {
+        setError("None of those links could be read. Check they are public and supported.");
+        return;
+      }
+      setBatch(items);
+    } finally {
+      setLoading(false);
+      setProgress(null);
+    }
+  };
+
   const handleSubmit = async () => {
-    const target = url.trim();
-    if (!looksLikeUrl(target)) {
-      setError("Please enter a valid http(s) URL.");
+    const { urls, invalid, overflow } = parseUrls(url);
+    if (urls.length === 0) {
+      setError(
+        invalid.length > 0
+          ? "That does not look like an http(s) link."
+          : "Please enter a valid http(s) URL.",
+      );
       return;
     }
     setError(null);
+
+    // Tell the user what was dropped rather than silently downloading less
+    // than they pasted.
+    const dropped: string[] = [];
+    if (invalid.length > 0) {
+      dropped.push(`${invalid.length} entr${invalid.length === 1 ? "y was" : "ies were"} not a link`);
+    }
+    if (overflow.length > 0) {
+      dropped.push(`${overflow.length} past the ${MAX_BATCH_LINKS}-link limit`);
+    }
+    setNotice(dropped.length > 0 ? `Skipped ${dropped.join(" and ")}.` : null);
+
+    if (urls.length > 1) {
+      await readBatch(urls);
+      return;
+    }
+
+    const target = urls[0];
     try {
       const existing = await api.checkDuplicate(target);
       if (existing) {
@@ -83,7 +150,7 @@ export function UrlBar({ autoFocus = false }: { autoFocus?: boolean }) {
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-            placeholder="Paste a video, audio or playlist URL…"
+            placeholder={`Paste a URL — or up to ${MAX_BATCH_LINKS}, separated by commas…`}
             className="h-11 pl-9 pr-10 text-base"
             spellCheck={false}
           />
@@ -99,7 +166,8 @@ export function UrlBar({ autoFocus = false }: { autoFocus?: boolean }) {
         <Button size="lg" className="h-11" onClick={handleSubmit} disabled={loading}>
           {loading ? (
             <>
-              <Loader2 className="animate-spin" /> Fetching…
+              <Loader2 className="animate-spin" />
+              {progress ? `Reading ${progress.done}/${progress.total}…` : "Fetching…"}
             </>
           ) : (
             "Download"
@@ -107,6 +175,7 @@ export function UrlBar({ autoFocus = false }: { autoFocus?: boolean }) {
         </Button>
       </div>
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      {notice && !error && <p className="mt-2 text-sm text-muted-foreground">{notice}</p>}
 
       {info && (
         <MetadataDialog
@@ -115,6 +184,19 @@ export function UrlBar({ autoFocus = false }: { autoFocus?: boolean }) {
           onQueued={() => {
             setInfo(null);
             setUrl("");
+            navigate("/downloads");
+          }}
+        />
+      )}
+
+      {batch && (
+        <BatchDialog
+          items={batch}
+          onClose={() => setBatch(null)}
+          onQueued={() => {
+            setBatch(null);
+            setUrl("");
+            setNotice(null);
             navigate("/downloads");
           }}
         />

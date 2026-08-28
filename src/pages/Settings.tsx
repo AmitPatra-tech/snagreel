@@ -30,7 +30,9 @@ const schema = z.object({
   download_path: z.string().min(1, "Choose a download folder"),
   theme: z.enum(["dark", "light", "system"]),
   language: z.string(),
-  max_concurrent_downloads: z.coerce.number().int().min(1).max(10),
+  // Keep in step with MAX_CONCURRENT_DOWNLOADS in src-tauri/src/models/mod.rs,
+  // which clamps whatever arrives anyway.
+  max_concurrent_downloads: z.coerce.number().int().min(1).max(12),
   auto_update: z.boolean(),
   notifications: z.boolean(),
   filename_template: z.string().min(1, "Template cannot be empty"),
@@ -145,7 +147,7 @@ export function SettingsPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {[1, 2, 3, 4, 5, 6, 8, 10].map((n) => (
+                    {[1, 2, 3, 4, 5, 6, 8, 10, 12].map((n) => (
                       <SelectItem key={n} value={String(n)}>
                         {n}
                       </SelectItem>
@@ -155,7 +157,9 @@ export function SettingsPage() {
               )}
             />
             <p className="text-xs text-muted-foreground">
-              How many downloads run at the same time.
+              How many downloads run at the same time. Some sites start refusing
+              requests when too many arrive at once — lower this if downloads from one
+              site begin to fail.
             </p>
           </div>
 
