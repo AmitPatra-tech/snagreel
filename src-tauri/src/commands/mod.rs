@@ -7,7 +7,7 @@ use crate::editor;
 use crate::filesystem;
 use crate::models::{
     Download, DownloadRequest, EditRequest, ExtractAudioRequest, LibraryQuery, MediaInfo, Settings,
-    TranscribeRequest, TranscribeResult,
+    StripMetadataRequest, TranscribeRequest, TranscribeResult,
 };
 use crate::transcribe;
 use crate::queue::{emit_status, QueueManager};
@@ -296,6 +296,15 @@ pub async fn extract_audio(
     job_id: String,
 ) -> Result<Vec<Download>, String> {
     editor::run_extract_audio(&app, request, job_id).await
+}
+
+#[tauri::command]
+pub async fn strip_metadata(
+    app: AppHandle,
+    request: StripMetadataRequest,
+    job_id: String,
+) -> Result<Download, String> {
+    editor::run_strip_metadata(&app, request, job_id).await
 }
 
 #[tauri::command]

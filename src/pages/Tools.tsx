@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
-import { Languages, Music, Wrench } from "lucide-react";
+import { Eraser, Languages, Music, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { TranscribeDialog } from "@/components/TranscribeDialog";
 import { ExtractAudioDialog } from "@/components/ExtractAudioDialog";
+import { StripMetadataDialog } from "@/components/StripMetadataDialog";
 import { ProBadge, UpgradeProDialog } from "@/components/UpgradeProDialog";
 import { useIsPro } from "@/hooks/useActivation";
 
@@ -23,6 +24,7 @@ export function ToolsPage() {
   const isPro = useIsPro();
   const [transcribeFile, setTranscribeFile] = useState<LocalFile | null>(null);
   const [extractFile, setExtractFile] = useState<LocalFile | null>(null);
+  const [metadataFile, setMetadataFile] = useState<LocalFile | null>(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
 
   const pickFile = async (set: (f: LocalFile) => void, title: string) => {
@@ -69,6 +71,14 @@ export function ToolsPage() {
         onClick={() => pickFile(setExtractFile, "Choose a video to extract audio from")}
       />
 
+      <ToolCard
+        icon={<Eraser className="h-6 w-6" />}
+        title="Remove metadata"
+        description="Strip embedded metadata — location, device info, timestamps, encoder tags — from a video or audio file before you share it. A clean copy is saved to your library."
+        action="Choose a file"
+        onClick={() => pickFile(setMetadataFile, "Choose a file to clean")}
+      />
+
       {transcribeFile && (
         <TranscribeDialog
           title={transcribeFile.title}
@@ -81,6 +91,13 @@ export function ToolsPage() {
           title={extractFile.title}
           inputPath={extractFile.path}
           onClose={() => setExtractFile(null)}
+        />
+      )}
+      {metadataFile && (
+        <StripMetadataDialog
+          title={metadataFile.title}
+          inputPath={metadataFile.path}
+          onClose={() => setMetadataFile(null)}
         />
       )}
       <UpgradeProDialog

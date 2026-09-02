@@ -8,6 +8,7 @@ import type {
   LibraryQuery,
   MediaInfo,
   Settings,
+  StripMetadataRequest,
   TranscribeRequest,
   TranscribeResult,
 } from "@/types";
@@ -62,4 +63,7 @@ export const api = {
 
   extractAudio: (request: ExtractAudioRequest, jobId: string) =>
     invoke<Download[]>("extract_audio", { request, jobId }),
+
+  stripMetadata: (request: StripMetadataRequest, jobId: string) =>
+    invoke<Download>("strip_metadata", { request, jobId }),
 };

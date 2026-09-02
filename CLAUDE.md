@@ -27,7 +27,7 @@ Bump **all three** in lockstep when releasing, then run the release workflow in
 Then run `cargo test --lib` so `src-tauri/Cargo.lock` picks up the new version
 and gets committed with them, and update "Current version" just below.
 
-Current version: **1.1.0**.
+Current version: **1.2.0**.
 
 Release in one go (see [RELEASING.md](RELEASING.md) for the gotchas):
 
@@ -179,6 +179,35 @@ zod schema and the dropdown — change all three together.
 Schema v5 moves existing installs from the old default of 3 to 12, but **only
 where the stored value is still exactly 3**, so anyone who picked their own
 number keeps it.
+
+## Remove metadata (added 2026-09-02)
+
+Pro tool on the Tools page: strips embedded metadata (title/author, GPS,
+timestamps, encoder/software tags, chapter markers) from any video or audio
+file by remuxing without re-encoding — `ffmpeg -map_metadata -1
+-map_chapters -1 -c copy`, so quality is bit-for-bit unchanged and it runs in
+roughly the time it takes to read the file.
+
+- `src-tauri/src/editor/mod.rs` — `run_strip_metadata()`. Same `source_id` /
+  `input_path` shape as `ExtractAudioRequest`/`TranscribeRequest`, so it works
+  both on an already-downloaded library item and on a file picked from disk.
+  Reuses `unique_output`/`insert_completed_local` from the trim/convert path.
+- `src/components/StripMetadataDialog.tsx` — modeled on
+  `ExtractAudioDialog.tsx`, no options to pick, just run/progress/done.
+- Wired into `src/pages/Tools.tsx` only (not into `EditorDialog.tsx` — that
+  dialog's `EditRequest` requires a library `source_id`, and this feature's
+  primary use is a freshly picked local file, which the Tools page already
+  handles for Transcribe/Extract audio the same way).
+
+**What this does and does not do.** `-map_metadata -1` clears whatever
+FFmpeg's demuxer surfaces as metadata (verified against a real MP4 tagged with
+`title`/`comment`/a custom location field — all three gone after stripping,
+and even the MP4 track's `handler_name` gets reset to FFmpeg's own generic
+value rather than keeping an encoder-supplied string). It is **general**
+privacy metadata removal — the same class of thing EXIF-scrubbing tools do for
+photos — not a tool aimed at defeating any specific provenance/watermarking
+scheme (C2PA manifests, invisible watermarks), and it was scoped that way on
+purpose. Keep the UI copy and this doc describing it in those general terms.
 
 ## Pro licensing architecture (rebuilt 2026-08-07/08)
 

@@ -107,6 +107,11 @@ export interface ExtractAudioRequest {
   formats: string[];
 }
 
+export interface StripMetadataRequest {
+  source_id?: number | null;
+  input_path?: string | null;
+}
+
 export interface TranscribeResult {
   text: string;
   txt_path: string;

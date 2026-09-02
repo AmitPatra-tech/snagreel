@@ -101,6 +101,17 @@ pub struct ExtractAudioRequest {
     pub formats: Vec<String>,
 }
 
+/// A Pro metadata-removal job: strip embedded metadata (author, device,
+/// GPS/location, timestamps, encoder/software tags) from a library item or a
+/// local file, by remuxing without re-encoding.
+#[derive(Debug, Clone, Deserialize)]
+pub struct StripMetadataRequest {
+    #[serde(default)]
+    pub source_id: Option<i64>,
+    #[serde(default)]
+    pub input_path: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TranscribeResult {
     pub text: String,

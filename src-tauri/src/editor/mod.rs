@@ -13,7 +13,7 @@ use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 
 use crate::database::Db;
-use crate::models::{Download, EditProgress, EditRequest, ExtractAudioRequest};
+use crate::models::{Download, EditProgress, EditRequest, ExtractAudioRequest, StripMetadataRequest};
 
 const AUDIO_EXTS: &[&str] = &["mp3", "m4a", "wav", "opus", "ogg", "flac", "aac"];
 
@@ -482,4 +482,123 @@ pub async fn run_extract_audio(
     } else {
         Ok(created)
     }
+}
+
+/// Pro: strip embedded metadata from a video or audio file (a library item or
+/// a local file) by remuxing without re-encoding. Returns the created library
+/// entry.
+///
+/// This removes whatever FFmpeg's demuxer surfaces as metadata (author,
+/// device/GPS, timestamps, encoder/software tags, chapter titles) — the same
+/// class of information EXIF-scrubbing tools remove from photos before
+/// sharing. It is not a guarantee against every embedded signal a given
+/// encoder might write into a container in a way `-map_metadata` does not
+/// reach.
+pub async fn run_strip_metadata(
+    app: &AppHandle,
+    req: StripMetadataRequest,
+    job_id: String,
+) -> Result<Download, String> {
+    let db = app.state::<Db>();
+    if !db.is_pro() {
+        return Err("Removing metadata is a Pro feature. Activate Pro to unlock it.".into());
+    }
+
+    let (input, thumbnail, duration, base_title, url): (
+        String,
+        Option<String>,
+        Option<f64>,
+        String,
+        String,
+    ) = if let Some(p) = req.input_path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        (p.to_string(), None, None, stem_of(p), format!("file:///{p}"))
+    } else if let Some(id) = req.source_id {
+        let s = db
+            .get_download(id)
+            .map_err(|_| "Could not find the item to clean.".to_string())?;
+        let path = s
+            .file_path
+            .clone()
+            .ok_or_else(|| "This item has no file on disk.".to_string())?;
+        (path, s.thumbnail.clone(), s.duration, s.title.clone(), s.url.clone())
+    } else {
+        return Err("No file was provided.".into());
+    };
+
+    if !Path::new(&input).is_file() {
+        return Err("The source file could not be found on disk.".into());
+    }
+    let ext = ext_of(&input);
+    if ext.is_empty() {
+        return Err("This file has no recognizable format.".into());
+    }
+
+    emit_progress(app, &job_id, Some(0.0));
+
+    let dir = {
+        let settings = db.get_settings().map_err(|e| e.to_string())?;
+        let d = PathBuf::from(&settings.download_path);
+        std::fs::create_dir_all(&d)
+            .map_err(|e| format!("Could not create the download folder: {e}"))?;
+        d
+    };
+    let stem = stem_of(&input);
+    let output = unique_output(&dir, &stem, "no metadata", &ext);
+
+    let args: Vec<String> = vec![
+        "-y".into(),
+        "-hide_banner".into(),
+        "-loglevel".into(),
+        "error".into(),
+        "-i".into(),
+        input.clone(),
+        "-map_metadata".into(),
+        "-1".into(),
+        "-map_chapters".into(),
+        "-1".into(),
+        "-c".into(),
+        "copy".into(),
+        output.to_string_lossy().into_owned(),
+    ];
+
+    let command = app
+        .shell()
+        .sidecar("ffmpeg")
+        .map_err(|_| "FFmpeg is missing. Reinstall the app to restore it.".to_string())?
+        .args(args);
+
+    let out = command
+        .output()
+        .await
+        .map_err(|e| format!("Could not start FFmpeg: {e}"))?;
+
+    if !out.status.success() {
+        let _ = std::fs::remove_file(&output);
+        return Err(friendly_error(&String::from_utf8_lossy(&out.stderr)));
+    }
+
+    emit_progress(app, &job_id, Some(100.0));
+
+    let meta = std::fs::metadata(&output).ok();
+    let file_size = meta.map(|m| m.len() as i64);
+    let file_path = output.to_string_lossy().into_owned();
+    let filename = output
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| file_path.clone());
+    let audio_only = is_audio_ext(&ext);
+
+    db.insert_completed_local(
+        &url,
+        &format!("{base_title} (metadata removed)"),
+        "Cleaned",
+        thumbnail.as_deref(),
+        &filename,
+        &file_path,
+        &ext,
+        audio_only,
+        duration,
+        file_size,
+    )
+    .map_err(|e| format!("Removed the metadata but could not save it to the library: {e}"))
 }

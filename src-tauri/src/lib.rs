@@ -79,6 +79,7 @@ pub fn run() {
             commands::run_edit,
             commands::transcribe,
             commands::extract_audio,
+            commands::strip_metadata,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
