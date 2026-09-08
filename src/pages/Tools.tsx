@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
-import { Eraser, Languages, Music, Wrench } from "lucide-react";
+import { Captions, Eraser, Languages, Music, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { TranscribeDialog } from "@/components/TranscribeDialog";
 import { ExtractAudioDialog } from "@/components/ExtractAudioDialog";
 import { StripMetadataDialog } from "@/components/StripMetadataDialog";
+import { AddCaptionsDialog } from "@/components/AddCaptionsDialog";
 import { ProBadge, UpgradeProDialog } from "@/components/UpgradeProDialog";
 import { useIsPro } from "@/hooks/useActivation";
 
@@ -25,6 +26,7 @@ export function ToolsPage() {
   const [transcribeFile, setTranscribeFile] = useState<LocalFile | null>(null);
   const [extractFile, setExtractFile] = useState<LocalFile | null>(null);
   const [metadataFile, setMetadataFile] = useState<LocalFile | null>(null);
+  const [captionsFile, setCaptionsFile] = useState<LocalFile | null>(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
 
   const pickFile = async (set: (f: LocalFile) => void, title: string) => {
@@ -79,6 +81,14 @@ export function ToolsPage() {
         onClick={() => pickFile(setMetadataFile, "Choose a file to clean")}
       />
 
+      <ToolCard
+        icon={<Captions className="h-6 w-6" />}
+        title="Add captions"
+        description="Analyze the speech in a video and burn matching captions directly onto a new copy — pick from a few caption styles. Runs on your device."
+        action="Choose a video"
+        onClick={() => pickFile(setCaptionsFile, "Choose a video to caption")}
+      />
+
       {transcribeFile && (
         <TranscribeDialog
           title={transcribeFile.title}
@@ -98,6 +108,13 @@ export function ToolsPage() {
           title={metadataFile.title}
           inputPath={metadataFile.path}
           onClose={() => setMetadataFile(null)}
+        />
+      )}
+      {captionsFile && (
+        <AddCaptionsDialog
+          title={captionsFile.title}
+          inputPath={captionsFile.path}
+          onClose={() => setCaptionsFile(null)}
         />
       )}
       <UpgradeProDialog

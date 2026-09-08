@@ -112,6 +112,14 @@ export interface StripMetadataRequest {
   input_path?: string | null;
 }
 
+export interface AddCaptionsRequest {
+  source_id?: number | null;
+  input_path?: string | null;
+  language: string;
+  /** "classic" | "yellow" | "boxed" | "minimal" */
+  style: string;
+}
+
 export interface TranscribeResult {
   text: string;
   txt_path: string;

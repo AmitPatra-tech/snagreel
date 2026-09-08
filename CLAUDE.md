@@ -27,7 +27,7 @@ Bump **all three** in lockstep when releasing, then run the release workflow in
 Then run `cargo test --lib` so `src-tauri/Cargo.lock` picks up the new version
 and gets committed with them, and update "Current version" just below.
 
-Current version: **1.2.0**.
+Current version: **1.3.0**.
 
 Release in one go (see [RELEASING.md](RELEASING.md) for the gotchas):
 
@@ -208,6 +208,55 @@ privacy metadata removal — the same class of thing EXIF-scrubbing tools do for
 photos — not a tool aimed at defeating any specific provenance/watermarking
 scheme (C2PA manifests, invisible watermarks), and it was scoped that way on
 purpose. Keep the UI copy and this doc describing it in those general terms.
+
+## Add captions (added 2026-09-08)
+
+Pro tool on the Tools page: transcribes the speech in a video, then burns the
+generated captions onto a new copy of it — one video in, one captioned video
+out, no separate subtitle file to manage.
+
+- `src-tauri/src/captions/mod.rs` — `run_add_captions()`. Deliberately a thin
+  second stage on top of the existing pipeline rather than a rewrite:
+  - **Transcribe**: calls `transcribe::run_transcribe()` directly (same
+    whisper model lookup, 16 kHz WAV extraction, progress) instead of
+    duplicating it. This is also why it inherits that feature's requirement —
+    the `whisper-cli` binary and a `ggml-*.bin` model must be present, exactly
+    as documented in `transcribe/mod.rs`; neither ships in the dev tree.
+  - **Burn**: a second FFmpeg pass with the `subtitles` filter over the `.srt`
+    that step produced, `-c:v` re-encoded (burning changes pixels, so `-c
+    copy` isn't an option) via the same `encode_args()` used by trim/convert.
+  - Both stages emit on the *same* `transcribe-progress` event/`job_id`, so
+    `AddCaptionsDialog.tsx` reuses `TranscribeProgress` and needs no new event
+    type — it shows whichever stage is currently running.
+  - Rejects audio-only input up front ("no video track") rather than letting
+    FFmpeg fail confusingly on a file with nothing to draw text onto.
+
+- Four caption-style presets (`force_style()`): Classic, Bold Yellow, Boxed,
+  Minimal. **Two things here are easy to get subtly wrong and were verified
+  against the shipped FFmpeg binary, not assumed:**
+  1. **ASS colours are `&HAABBGGRR`** (alpha, blue, green, red) — backwards
+     from the usual RRGGBB order. Confirmed by rendering an actual frame for
+     each preset (`&H0000FFFF` → yellow) and reading it back as an image.
+  2. **A bare Windows path breaks the `subtitles` filter.** `:` is the
+     filter's own option separator, so a drive letter (`C:\...`) truncates the
+     argument silently — first attempt at this failed with `Option not found:
+     ''` from a plain `-replace ':', '\:'`; every backslash also needs
+     doubling *before* the colon escape, or the count is wrong. The working
+     form is `escape_for_filter()`: backslash → `\\`, colon → `\:`, wrapped in
+     single quotes. Re-verify this specific mechanism (real Windows path,
+     extracted frame) if this filter string is ever touched.
+  `caption_font_size()` scales the text to a library item's known resolution;
+  a freshly picked local file has none, so it falls back to a 720p-tuned size
+  rather than probing the file just for this.
+
+- `src/components/AddCaptionsDialog.tsx` — style buttons show a CSS
+  approximation of each preset as a live preview; the real rendering is
+  entirely server-side (FFmpeg), the CSS is only there so the picker isn't
+  four identical unlabeled buttons.
+
+- Wired into `src/pages/Tools.tsx` only, same reasoning as Remove metadata:
+  `EditRequest` requires a library `source_id`, and picking a fresh local file
+  is the primary use case here.
 
 ## Pro licensing architecture (rebuilt 2026-08-07/08)
 

@@ -17,18 +17,18 @@ use crate::models::{Download, EditProgress, EditRequest, ExtractAudioRequest, St
 
 const AUDIO_EXTS: &[&str] = &["mp3", "m4a", "wav", "opus", "ogg", "flac", "aac"];
 
-fn is_audio_ext(ext: &str) -> bool {
+pub(crate) fn is_audio_ext(ext: &str) -> bool {
     AUDIO_EXTS.contains(&ext.to_ascii_lowercase().as_str())
 }
 
-fn ext_of(path: &str) -> String {
+pub(crate) fn ext_of(path: &str) -> String {
     Path::new(path)
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default()
 }
 
-fn stem_of(path: &str) -> String {
+pub(crate) fn stem_of(path: &str) -> String {
     Path::new(path)
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -36,7 +36,7 @@ fn stem_of(path: &str) -> String {
 }
 
 /// Encoder arguments for a target container/extension.
-fn encode_args(ext: &str) -> Vec<String> {
+pub(crate) fn encode_args(ext: &str) -> Vec<String> {
     let s = |v: &str| v.to_string();
     match ext.to_ascii_lowercase().as_str() {
         "mp4" | "mkv" | "mov" => vec![
@@ -61,7 +61,7 @@ fn audio_encode_args(ext: &str) -> Vec<String> {
 }
 
 /// Turn FFmpeg stderr into something a user can read.
-fn friendly_error(stderr: &str) -> String {
+pub(crate) fn friendly_error(stderr: &str) -> String {
     let lower = stderr.to_lowercase();
     if lower.contains("no space left") {
         return "Not enough disk space to save the edited file.".into();
@@ -103,7 +103,7 @@ fn round2(v: f64) -> String {
 }
 
 /// Pick a non-colliding output path in `dir` for `<stem> (<suffix>).<ext>`.
-fn unique_output(dir: &Path, stem: &str, suffix: &str, ext: &str) -> PathBuf {
+pub(crate) fn unique_output(dir: &Path, stem: &str, suffix: &str, ext: &str) -> PathBuf {
     let base = if suffix.is_empty() {
         format!("{stem} (edited)")
     } else {

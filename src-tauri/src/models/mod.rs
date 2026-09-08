@@ -112,6 +112,21 @@ pub struct StripMetadataRequest {
     pub input_path: Option<String>,
 }
 
+/// A Pro captioning job: transcribe the speech in a library item or a local
+/// file, then burn the generated captions into a new copy of the video.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AddCaptionsRequest {
+    #[serde(default)]
+    pub source_id: Option<i64>,
+    #[serde(default)]
+    pub input_path: Option<String>,
+    /// ISO language code (e.g. "en", "es", "hi") or "auto" to detect.
+    pub language: String,
+    /// One of "classic" | "yellow" | "boxed" | "minimal". Unrecognized values
+    /// fall back to "classic".
+    pub style: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TranscribeResult {
     pub text: String,

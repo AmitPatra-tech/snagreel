@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ActivationState,
+  AddCaptionsRequest,
   Download,
   DownloadRequest,
   EditRequest,
@@ -66,4 +67,7 @@ export const api = {
 
   stripMetadata: (request: StripMetadataRequest, jobId: string) =>
     invoke<Download>("strip_metadata", { request, jobId }),
+
+  addCaptions: (request: AddCaptionsRequest, jobId: string) =>
+    invoke<Download>("add_captions", { request, jobId }),
 };
