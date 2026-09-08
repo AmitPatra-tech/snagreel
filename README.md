@@ -40,7 +40,15 @@ downloader. Activated with a key (see below); everything above remains free.
   Accuracy is high but, as with all speech-to-text, not guaranteed perfect.
 - **Extract audio** — pull the audio out of any local video into one or more formats
   (MP3/M4A/WAV/AAC/FLAC/OGG) in a single run. *Tools → Extract audio.*
+- **Remove metadata** — strip embedded metadata (location, device info, timestamps,
+  encoder tags) from a local video or audio file. *Tools → Remove metadata.*
+- **Add captions** — transcribe a local video and burn the captions onto a new copy of
+  it, with a choice of caption styles. *Tools → Add captions.*
 - **Trim & convert** downloaded items — quick cut or container change. *Library → Edit.*
+
+The speech-to-text engine (whisper.cpp) and its default model are bundled into the
+installer automatically at build time — see "Bundled speech-to-text" below. No manual
+setup is needed to use Transcribe or Add captions in a released build.
 
 ### Activation
 
@@ -61,14 +69,21 @@ would be the durable fix.)
   - `yt-dlp-x86_64-pc-windows-msvc.exe` — from <https://github.com/yt-dlp/yt-dlp/releases>
   - `ffmpeg-x86_64-pc-windows-msvc.exe` — e.g. from <https://www.gyan.dev/ffmpeg/builds/> (`bin/ffmpeg.exe`, renamed)
   - On macOS/Linux use the matching target-triple suffix (e.g. `yt-dlp-aarch64-apple-darwin`)
-- **Optional — Pro transcription (speech-to-text):** place a Whisper CLI binary and a
-  model next to the app (searched in `src-tauri/binaries/` during `tauri dev`, and beside
-  the executable / in the resource dir when packaged). This component is optional — the app
-  builds and runs without it, and only the Pro "Transcribe to text" feature needs it:
-  - Binary named `whisper-cli` (also accepts `whisper` or `main`; add `.exe` on Windows) —
-    from <https://github.com/ggml-org/whisper.cpp> releases/build
-  - A model file `ggml-*.bin` (e.g. `ggml-large-v3.bin` for best accuracy) — the most
-    accurate available model present is chosen automatically
+- **Speech-to-text (Whisper), for local dev:** a packaged build fetches this
+  automatically (see "Bundled speech-to-text" below), but `cargo build`/`cargo test`
+  require the files to exist on disk even for a plain compile — `bundle.resources` in
+  `tauri.conf.json` is checked eagerly, not just at final packaging. Get them the same
+  way CI does:
+  ```bash
+  node scripts/fetch-whisper.mjs   # ~156 MB the first time; skips if already present
+  ```
+  This places `whisper-cli.exe` + its DLLs + `ggml-base.bin` in `src-tauri/binaries/`
+  (searched there during `tauri dev`, and beside the executable when packaged). To use a
+  different/larger model instead (e.g. `ggml-large-v3.bin`, for best accuracy — the most
+  accurate model present is chosen automatically), download it from
+  <https://huggingface.co/ggerganov/whisper.cpp> into `src-tauri/binaries/` yourself; the
+  fetch script only ever adds a model when none is present, so it won't overwrite your
+  choice.
 
 ### Run
 
@@ -90,12 +105,16 @@ src-tauri/
   src/database/       SQLite (rusqlite) + migrations
   src/downloader/     yt-dlp args (incl. clip sections), metadata, progress parsing, error mapping
   src/queue/          Tokio scheduler, workers, cancellation
-  src/editor/         FFmpeg trim/convert + audio extraction (Pro)
+  src/editor/         FFmpeg trim/convert + audio extraction + metadata removal (Pro)
   src/transcribe/     FFmpeg → Whisper speech-to-text (Pro)
+  src/captions/       Transcribe + FFmpeg subtitles filter → burned-in captions (Pro)
   src/activation/     Pro key hashing + verification
   src/filesystem/     folders, disk space, open/reveal/delete
   src/settings/       defaults
-  binaries/           yt-dlp + ffmpeg sidecars (+ optional whisper-cli & model)
+  binaries/           yt-dlp + ffmpeg sidecars + whisper-cli/DLLs/model (fetched, not committed)
+scripts/
+  fetch-whisper.mjs   downloads the speech-to-text engine + model into src-tauri/binaries/
+  tauri-prebuild.mjs  beforeBuildCommand: runs fetch-whisper.mjs, then the frontend build
 ```
 
 ## Architecture notes
@@ -104,6 +123,41 @@ src-tauri/
 - **Queue**: a single scheduler task claims queued items (priority DESC, position ASC) whenever slots free up; each worker spawns the yt-dlp sidecar, parses `--progress-template` lines, and finalizes DB state. Pause kills the process and keeps the queue row; resume re-queues and yt-dlp continues from the `.part` file.
 - **Database**: SQLite in the app data dir (`app.db`), WAL mode, `PRAGMA user_version` migrations; tables `downloads`, `settings`, `queue` per the PRD.
 - **Security**: URLs are validated, sidecar args are passed as an argv array (never a shell string), and folder names are sanitized. Library operations resolve file paths by DB id; the Pro local-file Tools accept a path only from the OS file-picker the user chose. Pro keys are verified against embedded hashes and Pro commands re-check activation server-side (in Rust).
+
+## Bundled speech-to-text
+
+Transcribe and Add captions need a Whisper model, which — until 2026-09 — was an
+optional, manually-installed component (see the retired "Optional — Pro transcription"
+setup step in git history). That meant public builds shipped with the feature
+advertised but non-functional out of the box.
+
+Fixed by fetching it automatically: `scripts/fetch-whisper.mjs` downloads
+`whisper-cli.exe` + its 4 required DLLs (from a **pinned** whisper.cpp release —
+not "latest", so an upstream rename can't silently break a release build) and
+`ggml-base.bin` (~148 MB, from Hugging Face) into `src-tauri/binaries/`, skipping
+anything already present. `tauri.conf.json`'s `beforeBuildCommand` runs
+`scripts/tauri-prebuild.mjs`, which runs that fetch and then the normal frontend
+build — so `tauri build` always has the files before FFmpeg/Rust ever runs.
+
+The files are wired in as `bundle.resources` (object form, mapped to bare
+filenames — see `tauri.conf.json`), landing flat in the installed app's directory,
+the same place `externalBin` already puts `yt-dlp.exe`/`ffmpeg.exe`. This is why
+`whisper-cli.exe` and its DLLs end up as *siblings* of `snagreel.exe` — required,
+since Windows' DLL loader searches the executable's own directory first, and
+`transcribe/mod.rs`'s existing `find_whisper()`/`find_model()` already check
+`current_exe().parent()` before anything else.
+
+**Consequence worth knowing:** `bundle.resources` is validated *eagerly* by
+`tauri_build::build()` — a plain `cargo build`/`cargo test` now fails if these
+files are missing, not just `tauri build`. This was already true of `yt-dlp`/
+`ffmpeg` via `externalBin` (verified by temporarily removing `ffmpeg-*.exe` and
+reproducing the identical "resource path ... doesn't exist" error), so this isn't
+new fragility, just the existing rule extended to a third component. Run
+`node scripts/fetch-whisper.mjs` once after cloning.
+
+Installer size grew accordingly (~48 MB → ~205 MB) — a deliberate tradeoff for
+"the Pro tools work the first time," made explicitly after the alternative
+(fetch the model on first use instead) was weighed and rejected.
 
 ## Planned next (M7–M8)
 

@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Snagreel",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "identifier": "com.snagreel.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "node scripts/tauri-prebuild.mjs",
     "frontendDist": "../dist"
   },
   "app": {
@@ -35,6 +35,14 @@
       "icons/icon.ico"
     ],
     "externalBin": ["binaries/yt-dlp", "binaries/ffmpeg"],
+    "resources": {
+      "binaries/whisper-cli.exe": "whisper-cli.exe",
+      "binaries/whisper.dll": "whisper.dll",
+      "binaries/ggml.dll": "ggml.dll",
+      "binaries/ggml-base.dll": "ggml-base.dll",
+      "binaries/ggml-cpu.dll": "ggml-cpu.dll",
+      "binaries/ggml-base.bin": "ggml-base.bin"
+    },
     "createUpdaterArtifacts": true
   },
   "plugins": {

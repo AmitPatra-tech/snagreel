@@ -27,7 +27,7 @@ Bump **all three** in lockstep when releasing, then run the release workflow in
 Then run `cargo test --lib` so `src-tauri/Cargo.lock` picks up the new version
 and gets committed with them, and update "Current version" just below.
 
-Current version: **1.3.0**.
+Current version: **1.3.1**.
 
 Release in one go (see [RELEASING.md](RELEASING.md) for the gotchas):
 
@@ -257,6 +257,85 @@ out, no separate subtitle file to manage.
 - Wired into `src/pages/Tools.tsx` only, same reasoning as Remove metadata:
   `EditRequest` requires a library `source_id`, and picking a fresh local file
   is the primary use case here.
+
+## Bundled speech-to-text (fixed 2026-09-08)
+
+**1.3.0 shipped "Add captions" advertised as a Pro feature that could not
+actually run** — Transcribe and Add captions both need a Whisper engine +
+model, which was an optional, manually-installed component (never fetched by
+the release workflow). A public user hit "Speech-to-text model not found" on
+a completely stock install. This was a release-process gap, not a captions
+bug — see `git log -- 'src-tauri/src/captions/'` for that feature's own
+verification, which was thorough for the burn mechanism and just didn't
+check whether the *engine* would exist for anyone but a dev with it manually
+installed.
+
+Fixed by bundling everything (the user's explicit choice — the alternative,
+fetching the model on first use, was offered and rejected): the engine +
+default model are now fetched automatically at build time and shipped in the
+installer, so a fresh install works immediately.
+
+- `scripts/fetch-whisper.mjs` — downloads `whisper-cli.exe` + 4 DLLs
+  (`whisper.dll`, `ggml.dll`, `ggml-base.dll`, `ggml-cpu.dll` — **not**
+  `SDL2.dll`, which the upstream zip also ships for the live-mic demos only;
+  confirmed unnecessary by running real synthesized speech through
+  whisper-cli with just these 5 files present) from a **pinned** whisper.cpp
+  release tag, and `ggml-base.bin` (~148 MB) from Hugging Face, into
+  `src-tauri/binaries/`. Skips anything already present, so a developer's own
+  whisper-cli build or a bigger model is never overwritten. Fails the build
+  loudly on any error — a silent skip here would recreate this exact bug.
+- `scripts/tauri-prebuild.mjs` — `beforeBuildCommand` in `tauri.conf.json`.
+  One Node script rather than a shell-chained command string
+  (`"a && b"`); reading Tauri's own CLI source (`dev.rs`/`build.rs`,
+  `run_hook`) confirmed the hook runs via `cmd /S /C` on Windows so `&&`
+  would in fact work, but the script avoids depending on that.
+- `tauri.conf.json` — `bundle.resources` (object form, source → bare
+  destination filename, no subdirectory) for the 6 fetched files. **Read
+  Tauri's own bundler source to confirm this, not assumed**: object-form
+  `resources` do not preserve directory structure, and land in `$RESOURCES`,
+  which on Windows is the same install root `externalBin` already uses —
+  confirmed via `crates/tauri-bundler/.../nsis/mod.rs`'s
+  `generate_resource_data()`, and consistent with the already-observed fact
+  that `ffmpeg.exe`/`yt-dlp.exe` sit directly next to `snagreel.exe` in a
+  real install. This placement is *required*, not cosmetic: Windows' DLL
+  loader searches the launching executable's own directory first, and
+  `transcribe/mod.rs`'s `find_whisper()` already checks
+  `current_exe().parent()` before anything else — so the DLLs have to be
+  siblings of `whisper-cli.exe`, which has to be a sibling of `snagreel.exe`.
+
+**`beforeBuildCommand` runs with cwd = the frontend/repo root, not
+`src-tauri/`** — confirmed by reading `dirs.frontend` in Tauri's own
+`run_hook` call, after a relative-path guess (`../scripts/...`, assuming
+`src-tauri/`-relative like `externalBin` paths) was wrong and caught before
+shipping. `beforeDevCommand` behaves the same way, for the same reason.
+
+**`bundle.resources` is validated eagerly by `tauri_build::build()`** — a
+plain `cargo build`/`cargo test` now fails outright if these files are
+missing, not just `tauri build`/bundling. Verified this is not new fragility:
+temporarily removing `ffmpeg-x86_64-pc-windows-msvc.exe` reproduces the
+*identical* `resource path ... doesn't exist` failure via `externalBin`, so
+`yt-dlp`/`ffmpeg` already required this. Run `node scripts/fetch-whisper.mjs`
+once after cloning, same as already placing yt-dlp/ffmpeg was always required.
+
+**Verified for real, twice, at increasing levels of rigor:**
+1. `whisper-cli.exe` + exactly those 4 DLLs + `ggml-base.bin`, invoked
+   directly, correctly transcribed real Windows-TTS-synthesized speech
+   word-for-word.
+2. The actual `tauri dev` build, with these exact fetched files in place,
+   driven through the real UI on a real test video (TTS speech muxed onto a
+   synthetic video track): "Add captions" → Boxed style → produced a real
+   output file, frame-extracted and read back as an image showing correctly
+   burned, boxed captions. Caught and worked around a genuine hazard during
+   this pass: **two Snagreel windows were running simultaneously** (the
+   user's already-open installed v1.3.0 alongside the freshly-launched dev
+   build), and a taskbar click landed on the wrong one at first, silently
+   re-testing the *old, broken* build instead of the fix. Resolved by
+   targeting the dev build's window by PID via `SetForegroundWindow`
+   (deterministic) rather than by screen position (ambiguous whenever more
+   than one instance is running) — recheck this if computer-use is ever
+   used to test Snagreel again.
+
+Installer size: **~48 MB → ~205 MB**. Known, deliberate tradeoff.
 
 ## Pro licensing architecture (rebuilt 2026-08-07/08)
 
