@@ -189,15 +189,15 @@ file by remuxing without re-encoding — `ffmpeg -map_metadata -1
 roughly the time it takes to read the file.
 
 - `src-tauri/src/editor/mod.rs` — `run_strip_metadata()`. Same `source_id` /
-  `input_path` shape as `ExtractAudioRequest`/`TranscribeRequest`, so it works
-  both on an already-downloaded library item and on a file picked from disk.
-  Reuses `unique_output`/`insert_completed_local` from the trim/convert path.
+  `input_path` shape as `ExtractAudioRequest`, so it works both on an
+  already-downloaded library item and on a file picked from disk. Reuses
+  `unique_output`/`insert_completed_local` from the trim/convert path.
 - `src/components/StripMetadataDialog.tsx` — modeled on
   `ExtractAudioDialog.tsx`, no options to pick, just run/progress/done.
 - Wired into `src/pages/Tools.tsx` only (not into `EditorDialog.tsx` — that
   dialog's `EditRequest` requires a library `source_id`, and this feature's
   primary use is a freshly picked local file, which the Tools page already
-  handles for Transcribe/Extract audio the same way).
+  handles for Extract audio the same way).
 
 **What this does and does not do.** `-map_metadata -1` clears whatever
 FFmpeg's demuxer surfaces as metadata (verified against a real MP4 tagged with
@@ -209,133 +209,44 @@ photos — not a tool aimed at defeating any specific provenance/watermarking
 scheme (C2PA manifests, invisible watermarks), and it was scoped that way on
 purpose. Keep the UI copy and this doc describing it in those general terms.
 
-## Add captions (added 2026-09-08)
+## Speech-to-text was removed (2026-09-08) — do not re-add without re-reading this
 
-Pro tool on the Tools page: transcribes the speech in a video, then burns the
-generated captions onto a new copy of it — one video in, one captioned video
-out, no separate subtitle file to manage.
+Snagreel briefly had **Transcribe to text** and **Add captions** (Pro tools
+built on `whisper.cpp`). Both are gone as of 1.3.1. History, so the same path
+isn't walked again without knowing where it leads:
 
-- `src-tauri/src/captions/mod.rs` — `run_add_captions()`. Deliberately a thin
-  second stage on top of the existing pipeline rather than a rewrite:
-  - **Transcribe**: calls `transcribe::run_transcribe()` directly (same
-    whisper model lookup, 16 kHz WAV extraction, progress) instead of
-    duplicating it. This is also why it inherits that feature's requirement —
-    the `whisper-cli` binary and a `ggml-*.bin` model must be present, exactly
-    as documented in `transcribe/mod.rs`; neither ships in the dev tree.
-  - **Burn**: a second FFmpeg pass with the `subtitles` filter over the `.srt`
-    that step produced, `-c:v` re-encoded (burning changes pixels, so `-c
-    copy` isn't an option) via the same `encode_args()` used by trim/convert.
-  - Both stages emit on the *same* `transcribe-progress` event/`job_id`, so
-    `AddCaptionsDialog.tsx` reuses `TranscribeProgress` and needs no new event
-    type — it shows whichever stage is currently running.
-  - Rejects audio-only input up front ("no video track") rather than letting
-    FFmpeg fail confusingly on a file with nothing to draw text onto.
+1. Transcribe already existed with Whisper as an **optional, manually-placed**
+   component (never fetched by the release workflow). 1.3.0 added Add
+   captions on top of it without noticing this meant *neither* feature could
+   work on a public install — a user hit "Speech-to-text model not found" on
+   a completely stock 1.3.0.
+2. The fix built for 1.3.1 was to **bundle the engine + model into the
+   installer automatically** (`scripts/fetch-whisper.mjs` fetching a pinned
+   whisper.cpp release + `ggml-base.bin` into `bundle.resources`). This was
+   built, and verified end-to-end for real — real whisper-cli transcribing
+   real synthesized speech, then the actual dev build, driven through the
+   real UI, producing a real burned-caption video confirmed by reading an
+   extracted frame back as an image.
+3. **That fix was never shipped.** The user rejected it before release,
+   because it grew the installer from ~48 MB to ~205 MB — a jump not worth
+   captions/transcription for this app. Both features, and everything that
+   supported them, were removed instead:
+   - `src-tauri/src/transcribe/` and `src-tauri/src/captions/` (deleted)
+   - `scripts/fetch-whisper.mjs`, `scripts/tauri-prebuild.mjs` (deleted)
+   - `bundle.resources` and the custom `beforeBuildCommand` in
+     `tauri.conf.json` (reverted to plain `npm run build`)
+   - `TranscribeDialog.tsx`, `AddCaptionsDialog.tsx`, their Tools-page cards,
+     and the associated request/response types (deleted)
 
-- Four caption-style presets (`force_style()`): Classic, Bold Yellow, Boxed,
-  Minimal. **Two things here are easy to get subtly wrong and were verified
-  against the shipped FFmpeg binary, not assumed:**
-  1. **ASS colours are `&HAABBGGRR`** (alpha, blue, green, red) — backwards
-     from the usual RRGGBB order. Confirmed by rendering an actual frame for
-     each preset (`&H0000FFFF` → yellow) and reading it back as an image.
-  2. **A bare Windows path breaks the `subtitles` filter.** `:` is the
-     filter's own option separator, so a drive letter (`C:\...`) truncates the
-     argument silently — first attempt at this failed with `Option not found:
-     ''` from a plain `-replace ':', '\:'`; every backslash also needs
-     doubling *before* the colon escape, or the count is wrong. The working
-     form is `escape_for_filter()`: backslash → `\\`, colon → `\:`, wrapped in
-     single quotes. Re-verify this specific mechanism (real Windows path,
-     extracted frame) if this filter string is ever touched.
-  `caption_font_size()` scales the text to a library item's known resolution;
-  a freshly picked local file has none, so it falls back to a 720p-tuned size
-  rather than probing the file just for this.
-
-- `src/components/AddCaptionsDialog.tsx` — style buttons show a CSS
-  approximation of each preset as a live preview; the real rendering is
-  entirely server-side (FFmpeg), the CSS is only there so the picker isn't
-  four identical unlabeled buttons.
-
-- Wired into `src/pages/Tools.tsx` only, same reasoning as Remove metadata:
-  `EditRequest` requires a library `source_id`, and picking a fresh local file
-  is the primary use case here.
-
-## Bundled speech-to-text (fixed 2026-09-08)
-
-**1.3.0 shipped "Add captions" advertised as a Pro feature that could not
-actually run** — Transcribe and Add captions both need a Whisper engine +
-model, which was an optional, manually-installed component (never fetched by
-the release workflow). A public user hit "Speech-to-text model not found" on
-a completely stock install. This was a release-process gap, not a captions
-bug — see `git log -- 'src-tauri/src/captions/'` for that feature's own
-verification, which was thorough for the burn mechanism and just didn't
-check whether the *engine* would exist for anyone but a dev with it manually
-installed.
-
-Fixed by bundling everything (the user's explicit choice — the alternative,
-fetching the model on first use, was offered and rejected): the engine +
-default model are now fetched automatically at build time and shipped in the
-installer, so a fresh install works immediately.
-
-- `scripts/fetch-whisper.mjs` — downloads `whisper-cli.exe` + 4 DLLs
-  (`whisper.dll`, `ggml.dll`, `ggml-base.dll`, `ggml-cpu.dll` — **not**
-  `SDL2.dll`, which the upstream zip also ships for the live-mic demos only;
-  confirmed unnecessary by running real synthesized speech through
-  whisper-cli with just these 5 files present) from a **pinned** whisper.cpp
-  release tag, and `ggml-base.bin` (~148 MB) from Hugging Face, into
-  `src-tauri/binaries/`. Skips anything already present, so a developer's own
-  whisper-cli build or a bigger model is never overwritten. Fails the build
-  loudly on any error — a silent skip here would recreate this exact bug.
-- `scripts/tauri-prebuild.mjs` — `beforeBuildCommand` in `tauri.conf.json`.
-  One Node script rather than a shell-chained command string
-  (`"a && b"`); reading Tauri's own CLI source (`dev.rs`/`build.rs`,
-  `run_hook`) confirmed the hook runs via `cmd /S /C` on Windows so `&&`
-  would in fact work, but the script avoids depending on that.
-- `tauri.conf.json` — `bundle.resources` (object form, source → bare
-  destination filename, no subdirectory) for the 6 fetched files. **Read
-  Tauri's own bundler source to confirm this, not assumed**: object-form
-  `resources` do not preserve directory structure, and land in `$RESOURCES`,
-  which on Windows is the same install root `externalBin` already uses —
-  confirmed via `crates/tauri-bundler/.../nsis/mod.rs`'s
-  `generate_resource_data()`, and consistent with the already-observed fact
-  that `ffmpeg.exe`/`yt-dlp.exe` sit directly next to `snagreel.exe` in a
-  real install. This placement is *required*, not cosmetic: Windows' DLL
-  loader searches the launching executable's own directory first, and
-  `transcribe/mod.rs`'s `find_whisper()` already checks
-  `current_exe().parent()` before anything else — so the DLLs have to be
-  siblings of `whisper-cli.exe`, which has to be a sibling of `snagreel.exe`.
-
-**`beforeBuildCommand` runs with cwd = the frontend/repo root, not
-`src-tauri/`** — confirmed by reading `dirs.frontend` in Tauri's own
-`run_hook` call, after a relative-path guess (`../scripts/...`, assuming
-`src-tauri/`-relative like `externalBin` paths) was wrong and caught before
-shipping. `beforeDevCommand` behaves the same way, for the same reason.
-
-**`bundle.resources` is validated eagerly by `tauri_build::build()`** — a
-plain `cargo build`/`cargo test` now fails outright if these files are
-missing, not just `tauri build`/bundling. Verified this is not new fragility:
-temporarily removing `ffmpeg-x86_64-pc-windows-msvc.exe` reproduces the
-*identical* `resource path ... doesn't exist` failure via `externalBin`, so
-`yt-dlp`/`ffmpeg` already required this. Run `node scripts/fetch-whisper.mjs`
-once after cloning, same as already placing yt-dlp/ffmpeg was always required.
-
-**Verified for real, twice, at increasing levels of rigor:**
-1. `whisper-cli.exe` + exactly those 4 DLLs + `ggml-base.bin`, invoked
-   directly, correctly transcribed real Windows-TTS-synthesized speech
-   word-for-word.
-2. The actual `tauri dev` build, with these exact fetched files in place,
-   driven through the real UI on a real test video (TTS speech muxed onto a
-   synthetic video track): "Add captions" → Boxed style → produced a real
-   output file, frame-extracted and read back as an image showing correctly
-   burned, boxed captions. Caught and worked around a genuine hazard during
-   this pass: **two Snagreel windows were running simultaneously** (the
-   user's already-open installed v1.3.0 alongside the freshly-launched dev
-   build), and a taskbar click landed on the wrong one at first, silently
-   re-testing the *old, broken* build instead of the fix. Resolved by
-   targeting the dev build's window by PID via `SetForegroundWindow`
-   (deterministic) rather than by screen position (ambiguous whenever more
-   than one instance is running) — recheck this if computer-use is ever
-   used to test Snagreel again.
-
-Installer size: **~48 MB → ~205 MB**. Known, deliberate tradeoff.
+**If a future request wants speech-to-text back**, the size cost is the
+entire question to settle *first*, before writing any code — everything else
+(the engine/model fetch, the `bundle.resources` wiring, the burn-in mechanics
+including the `&HAABBGGRR` colour order and the Windows-path filter-escaping
+gotcha) was built correctly on the first real attempt and is recoverable from
+git history (`git log --all --oneline -- 'src-tauri/src/captions/'`). The
+~150 MB Whisper model is unavoidable for *any* on-device speech-to-text, no
+matter how it's packaged — bundled, fetched on first use, or left manual —
+so confirm the size is acceptable before reintroducing it, not after.
 
 ## Pro licensing architecture (rebuilt 2026-08-07/08)
 

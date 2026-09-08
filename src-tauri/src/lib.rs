@@ -1,5 +1,4 @@
 mod activation;
-mod captions;
 mod commands;
 mod database;
 mod downloader;
@@ -8,7 +7,6 @@ mod filesystem;
 mod models;
 mod queue;
 mod settings;
-mod transcribe;
 
 use tauri::Manager;
 
@@ -78,10 +76,8 @@ pub fn run() {
             commands::activate_pro,
             commands::deactivate_pro,
             commands::run_edit,
-            commands::transcribe,
             commands::extract_audio,
             commands::strip_metadata,
-            commands::add_captions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

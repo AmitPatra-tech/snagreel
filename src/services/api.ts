@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ActivationState,
-  AddCaptionsRequest,
   Download,
   DownloadRequest,
   EditRequest,
@@ -10,8 +9,6 @@ import type {
   MediaInfo,
   Settings,
   StripMetadataRequest,
-  TranscribeRequest,
-  TranscribeResult,
 } from "@/types";
 
 export const api = {
@@ -59,15 +56,9 @@ export const api = {
   runEdit: (request: EditRequest, jobId: string) =>
     invoke<Download>("run_edit", { request, jobId }),
 
-  transcribe: (request: TranscribeRequest, jobId: string) =>
-    invoke<TranscribeResult>("transcribe", { request, jobId }),
-
   extractAudio: (request: ExtractAudioRequest, jobId: string) =>
     invoke<Download[]>("extract_audio", { request, jobId }),
 
   stripMetadata: (request: StripMetadataRequest, jobId: string) =>
     invoke<Download>("strip_metadata", { request, jobId }),
-
-  addCaptions: (request: AddCaptionsRequest, jobId: string) =>
-    invoke<Download>("add_captions", { request, jobId }),
 };

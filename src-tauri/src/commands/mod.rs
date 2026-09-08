@@ -1,16 +1,14 @@
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::activation::{self, ActivationState};
-use crate::captions;
 use crate::database::Db;
 use crate::downloader;
 use crate::editor;
 use crate::filesystem;
 use crate::models::{
-    AddCaptionsRequest, Download, DownloadRequest, EditRequest, ExtractAudioRequest, LibraryQuery,
-    MediaInfo, Settings, StripMetadataRequest, TranscribeRequest, TranscribeResult,
+    Download, DownloadRequest, EditRequest, ExtractAudioRequest, LibraryQuery, MediaInfo,
+    Settings, StripMetadataRequest,
 };
-use crate::transcribe;
 use crate::queue::{emit_status, QueueManager};
 
 fn err_string(e: impl std::fmt::Display) -> String {
@@ -282,15 +280,6 @@ pub async fn run_edit(
 }
 
 #[tauri::command]
-pub async fn transcribe(
-    app: AppHandle,
-    request: TranscribeRequest,
-    job_id: String,
-) -> Result<TranscribeResult, String> {
-    transcribe::run_transcribe(&app, request, job_id).await
-}
-
-#[tauri::command]
 pub async fn extract_audio(
     app: AppHandle,
     request: ExtractAudioRequest,
@@ -306,15 +295,6 @@ pub async fn strip_metadata(
     job_id: String,
 ) -> Result<Download, String> {
     editor::run_strip_metadata(&app, request, job_id).await
-}
-
-#[tauri::command]
-pub async fn add_captions(
-    app: AppHandle,
-    request: AddCaptionsRequest,
-    job_id: String,
-) -> Result<Download, String> {
-    captions::run_add_captions(&app, request, job_id).await
 }
 
 #[tauri::command]

@@ -95,12 +95,6 @@ export interface EditProgress {
   percent: number | null;
 }
 
-export interface TranscribeRequest {
-  source_id?: number | null;
-  input_path?: string | null;
-  language: string;
-}
-
 export interface ExtractAudioRequest {
   source_id?: number | null;
   input_path?: string | null;
@@ -110,26 +104,6 @@ export interface ExtractAudioRequest {
 export interface StripMetadataRequest {
   source_id?: number | null;
   input_path?: string | null;
-}
-
-export interface AddCaptionsRequest {
-  source_id?: number | null;
-  input_path?: string | null;
-  language: string;
-  /** "classic" | "yellow" | "boxed" | "minimal" */
-  style: string;
-}
-
-export interface TranscribeResult {
-  text: string;
-  txt_path: string;
-  srt_path: string;
-}
-
-export interface TranscribeProgress {
-  job_id: string;
-  percent: number | null;
-  stage: string;
 }
 
 export interface Settings {

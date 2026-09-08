@@ -13,6 +13,6 @@ export const DODO_CHECKOUT_URL =
 /** Human-readable list of what Pro unlocks (shown on the paywall). */
 export const PRO_FEATURES = [
   "Clip / cutout — download just a section of a long video",
-  "Transcribe audio & video to text in 90+ languages (high accuracy)",
   "Extract audio from any file, and trim or convert your downloads",
+  "Remove embedded metadata from a video or audio file before sharing it",
 ] as const;

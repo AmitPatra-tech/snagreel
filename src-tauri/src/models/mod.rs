@@ -77,18 +77,6 @@ pub struct EditProgress {
     pub percent: Option<f64>,
 }
 
-/// A Pro speech-to-text job. Provide either a library `source_id` or a local
-/// `input_path` (for a file the user picked from disk).
-#[derive(Debug, Clone, Deserialize)]
-pub struct TranscribeRequest {
-    #[serde(default)]
-    pub source_id: Option<i64>,
-    #[serde(default)]
-    pub input_path: Option<String>,
-    /// ISO language code (e.g. "en", "es", "hi") or "auto" to detect.
-    pub language: String,
-}
-
 /// A Pro audio-extraction job: pull the audio track out of a video (a library
 /// item or a local file of any format) into one or more audio formats.
 #[derive(Debug, Clone, Deserialize)]
@@ -110,37 +98,6 @@ pub struct StripMetadataRequest {
     pub source_id: Option<i64>,
     #[serde(default)]
     pub input_path: Option<String>,
-}
-
-/// A Pro captioning job: transcribe the speech in a library item or a local
-/// file, then burn the generated captions into a new copy of the video.
-#[derive(Debug, Clone, Deserialize)]
-pub struct AddCaptionsRequest {
-    #[serde(default)]
-    pub source_id: Option<i64>,
-    #[serde(default)]
-    pub input_path: Option<String>,
-    /// ISO language code (e.g. "en", "es", "hi") or "auto" to detect.
-    pub language: String,
-    /// One of "classic" | "yellow" | "boxed" | "minimal". Unrecognized values
-    /// fall back to "classic".
-    pub style: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct TranscribeResult {
-    pub text: String,
-    pub txt_path: String,
-    pub srt_path: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct TranscribeProgress {
-    pub job_id: String,
-    /// 0–100 when known, else `None` (indeterminate).
-    pub percent: Option<f64>,
-    /// Short human-readable stage label.
-    pub stage: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

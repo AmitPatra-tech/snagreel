@@ -19,16 +19,6 @@ src-tauri/binaries/ffmpeg
 .env.*
 !.env.example
 
-# Whisper speech-to-text engine + model (large, fetched by
-# scripts/fetch-whisper.mjs at build time — see beforeBuildCommand — not
-# committed)
-src-tauri/binaries/*.bin
-src-tauri/binaries/*.dll
-src-tauri/binaries/whisper*
-src-tauri/binaries/ggml*
-
-# Scratch dir used by scripts/fetch-whisper.mjs while extracting
-.whisper-fetch-tmp/
 
 # Local machine settings
 .claude/settings.local.json
